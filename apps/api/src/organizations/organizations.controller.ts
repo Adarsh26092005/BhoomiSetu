@@ -31,6 +31,8 @@ import {
   PaginatedOrganizationsResponseDto,
 } from './dto/organization-response.dto';
 
+import { AuthenticatedUser } from '../auth/interfaces/jwt-payload.interface';
+
 @ApiTags('Organizations Management')
 @Controller('organizations')
 export class OrganizationsController {
@@ -94,8 +96,11 @@ export class OrganizationsController {
     description: 'Paginated organizations retrieved successfully.',
     type: PaginatedOrganizationsResponseDto,
   })
-  async findAll(@Query() query: OrganizationQueryDto): Promise<PaginatedOrganizationsResponseDto> {
-    return this.organizationsService.findAll(query);
+  async findAll(
+    @Query() query: OrganizationQueryDto,
+    @CurrentUser() user?: AuthenticatedUser,
+  ): Promise<PaginatedOrganizationsResponseDto> {
+    return this.organizationsService.findAll(query, user);
   }
 
   @Get(':id')

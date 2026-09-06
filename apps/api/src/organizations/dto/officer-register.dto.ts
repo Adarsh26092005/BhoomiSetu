@@ -25,26 +25,26 @@ export class OfficerRegisterDto {
   @IsNotEmpty({ message: 'Official email is required' })
   email!: string;
 
-  @ApiPropertyOptional({ example: '+91-9876543210', description: 'Official mobile or desk contact number' })
-  @IsOptional()
-  @IsString()
+  @ApiProperty({ example: '+91-9876543210', description: 'Official mobile or desk contact number' })
+  @IsString({ message: 'Phone number must be a string' })
+  @IsNotEmpty({ message: 'Contact phone number is required' })
   @MaxLength(20)
-  phone?: string;
+  phone!: string;
 
-  @ApiPropertyOptional({ example: 'GOV-MAH-REV-84920', description: 'Official employee / officer identification code' })
-  @IsOptional()
-  @IsString()
+  @ApiProperty({ example: 'GOV-MAH-REV-84920', description: 'Official employee / officer identification code' })
+  @IsString({ message: 'Employee ID must be a string' })
+  @IsNotEmpty({ message: 'Employee/Officer identification code is required' })
   @MaxLength(50)
-  employeeId?: string;
+  employeeId!: string;
 
   @ApiProperty({ example: 'Deputy Collector / Special Land Acquisition Officer', description: 'Official government designation' })
-  @IsString()
+  @IsString({ message: 'Designation must be a string' })
   @IsNotEmpty({ message: 'Designation is required' })
   @MaxLength(100)
   designation!: string;
 
   @ApiProperty({ example: 'Department of Revenue & Forest, Govt of Maharashtra', description: 'Parent ministry or state department' })
-  @IsString()
+  @IsString({ message: 'Department/Ministry name must be a string' })
   @IsNotEmpty({ message: 'Department/Ministry name is required' })
   @MaxLength(200)
   departmentName!: string;
@@ -61,22 +61,22 @@ export class OfficerRegisterDto {
   organizationType!: OrganizationType;
 
   @ApiProperty({ example: 'Maharashtra', description: 'State of jurisdiction' })
-  @IsString()
+  @IsString({ message: 'State must be a string' })
   @IsNotEmpty({ message: 'State is required' })
   @MaxLength(100)
   state!: string;
 
-  @ApiPropertyOptional({ example: 'Nagpur', description: 'District of jurisdiction (required for District Authority)' })
-  @IsOptional()
-  @IsString()
+  @ApiProperty({ example: 'Nagpur', description: 'District of jurisdiction (required for jurisdiction routing)' })
+  @IsString({ message: 'District must be a string' })
+  @IsNotEmpty({ message: 'District is required' })
   @MaxLength(100)
-  district?: string;
+  district!: string;
 
-  @ApiPropertyOptional({ example: 'Collectorate Complex, Civil Lines, Nagpur - 440001', description: 'Official office address' })
-  @IsOptional()
-  @IsString()
+  @ApiProperty({ example: 'Collectorate Complex, Civil Lines, Nagpur - 440001', description: 'Official office address' })
+  @IsString({ message: 'Office address must be a string' })
+  @IsNotEmpty({ message: 'Official office address is required' })
   @MaxLength(500)
-  officeAddress?: string;
+  officeAddress!: string;
 
   @ApiProperty({
     enum: UserRole,
@@ -88,7 +88,7 @@ export class OfficerRegisterDto {
   requestedRole!: UserRole;
 
   @ApiProperty({ example: 'SecureOfficer2026!', description: 'Account access password (minimum 8 characters)' })
-  @IsString()
+  @IsString({ message: 'Password must be a string' })
   @IsNotEmpty({ message: 'Password is required' })
   @MinLength(8, { message: 'Password must be at least 8 characters long' })
   @MaxLength(128)

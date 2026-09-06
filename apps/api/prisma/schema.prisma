@@ -52,6 +52,23 @@ enum OrganizationStatus {
   SUSPENDED
 }
 
+enum AdminJurisdictionLevel {
+  CENTRAL
+  STATE_AREA
+}
+
+enum ApprovalRequestType {
+  OFFICER_REGISTRATION
+  PIA_REGISTRATION
+}
+
+enum ApprovalRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  ON_HOLD
+}
+
 enum ProjectStatus {
   DRAFT
   SUBMITTED
@@ -293,9 +310,10 @@ model Organization {
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
 
-  users         User[]
-  projects      Project[]      @relation("ImplementingAgencyProjects")
-  workflowTasks WorkflowTask[] @relation("AssignedOrgTasks")
+  users            User[]
+  projects         Project[]         @relation("ImplementingAgencyProjects")
+  workflowTasks    WorkflowTask[]    @relation("AssignedOrgTasks")
+  approvalRequests ApprovalRequest[] @relation("OrgApprovalRequests")
 
   @@index([type])
   @@index([status])
@@ -338,6 +356,11 @@ model User {
   authSessions               AuthSession[]
   projectAssignments         ProjectAssignment[]
   assignedProjectAssignments ProjectAssignment[]              @relation("AssignedByOfficers")
+  superAdminAssignments      SuperAdminAssignment[]           @relation("UserSuperAdminAssignments")
+  assignedSuperAdmins        SuperAdminAssignment[]           @relation("AssignedBySuperAdmins")
+  requestedApprovalRequests  ApprovalRequest[]                @relation("RequesterUserApprovalRequests")
+  assignedApprovalRequests   ApprovalRequest[]                @relation("AssignedApproverRequests")
+  reviewedApprovalRequests   ApprovalRequest[]                @relation("ReviewedByUserApprovalRequests")
 
   @@index([role])
   @@index([accountType])
@@ -380,6 +403,89 @@ model ProjectAssignment {
   @@index([userId])
   @@index([isActive])
   @@map("project_assignments")
+}
+
+model AdministrativeArea {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  state       String
+  description String?  @db.Text
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  districts             AdministrativeAreaDistrict[]
+  superAdminAssignments SuperAdminAssignment[]
+  approvalRequests      ApprovalRequest[]
+
+  @@index([state])
+  @@index([active])
+  @@map("administrative_areas")
+}
+
+model AdministrativeAreaDistrict {
+  id                   String             @id @default(uuid())
+  administrativeAreaId String
+  administrativeArea   AdministrativeArea @relation(fields: [administrativeAreaId], references: [id], onDelete: Cascade)
+  district             String
+  createdAt            DateTime           @default(now())
+
+  @@unique([administrativeAreaId, district])
+  @@index([administrativeAreaId])
+  @@index([district])
+  @@map("administrative_area_districts")
+}
+
+model SuperAdminAssignment {
+  id                   String                 @id @default(uuid())
+  userId               String
+  user                 User                   @relation("UserSuperAdminAssignments", fields: [userId], references: [id], onDelete: Cascade)
+  administrativeAreaId String?
+  administrativeArea   AdministrativeArea?    @relation(fields: [administrativeAreaId], references: [id], onDelete: SetNull)
+  jurisdictionLevel    AdminJurisdictionLevel @default(STATE_AREA)
+  isPrimary            Boolean                @default(false)
+  isActive             Boolean                @default(true)
+  assignedAt           DateTime               @default(now())
+  assignedById         String?
+  assignedBy           User?                  @relation("AssignedBySuperAdmins", fields: [assignedById], references: [id], onDelete: SetNull)
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+
+  @@index([userId])
+  @@index([administrativeAreaId])
+  @@index([isActive])
+  @@map("super_admin_assignments")
+}
+
+model ApprovalRequest {
+  id                   String                @id @default(uuid())
+  requestType          ApprovalRequestType
+  requesterUserId      String?
+  requesterUser        User?                 @relation("RequesterUserApprovalRequests", fields: [requesterUserId], references: [id], onDelete: SetNull)
+  organizationId       String?
+  organization         Organization?         @relation("OrgApprovalRequests", fields: [organizationId], references: [id], onDelete: SetNull)
+  state                String
+  district             String?
+  administrativeAreaId String?
+  administrativeArea   AdministrativeArea?   @relation(fields: [administrativeAreaId], references: [id], onDelete: SetNull)
+  assignedApproverId   String?
+  assignedApprover     User?                 @relation("AssignedApproverRequests", fields: [assignedApproverId], references: [id], onDelete: SetNull)
+  status               ApprovalRequestStatus @default(PENDING)
+  submittedAt          DateTime              @default(now())
+  reviewedAt           DateTime?
+  reviewedById         String?
+  reviewedBy           User?                 @relation("ReviewedByUserApprovalRequests", fields: [reviewedById], references: [id], onDelete: SetNull)
+  rejectionReason      String?               @db.Text
+  metadata             Json?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  @@index([status])
+  @@index([state, district])
+  @@index([administrativeAreaId])
+  @@index([assignedApproverId])
+  @@map("approval_requests")
 }
 
 // ==============================================================================

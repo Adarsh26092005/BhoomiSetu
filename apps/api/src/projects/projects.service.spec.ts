@@ -13,6 +13,7 @@ import {
   UserRole,
 } from '@prisma/client';
 import { ProjectsService } from './projects.service';
+import { JurisdictionService } from '../jurisdiction/jurisdiction.service';
 import { PrismaService } from '../database/prisma.service';
 import { AuthenticatedUser } from '../auth/interfaces/jwt-payload.interface';
 
@@ -205,11 +206,36 @@ describe('ProjectsService', () => {
       'proj-2': { ...mockProject2 },
     };
 
+    const userMap: Record<string, any> = {
+      'user-central-1': { ...mockCentralUser, organization: mockCentralOrg, superAdminAssignments: [], projectAssignments: [] },
+      'user-state-1': { ...mockStateUser, organization: mockStateOrg, superAdminAssignments: [], projectAssignments: [] },
+      'user-district-1': { ...mockDistrictUser, organization: mockDistrictOrg, superAdminAssignments: [], projectAssignments: [] },
+      'user-pia-1': { ...mockPiaUser1, organization: mockPiaOrg1, superAdminAssignments: [], projectAssignments: [] },
+      'user-pia-2': { ...mockPiaUser2, organization: mockPiaOrg2, superAdminAssignments: [], projectAssignments: [] },
+      'user-viewer-1': { ...mockViewerUser, organization: mockCentralOrg, superAdminAssignments: [], projectAssignments: [] },
+    };
+
     const mockPrismaService = {
       organization: {
         findUnique: jest.fn().mockImplementation(({ where }) => {
           return Promise.resolve(orgMap[where.id] || null);
         }),
+      },
+      user: {
+        findUnique: jest.fn().mockImplementation(({ where }) => {
+          const u = userMap[where.id] || {
+            id: where.id,
+            role: UserRole.SUPER_ADMIN,
+            accountType: AccountType.GOVERNMENT_OFFICER,
+            organization: mockCentralOrg,
+            superAdminAssignments: [],
+            projectAssignments: [],
+          };
+          return Promise.resolve(u);
+        }),
+      },
+      superAdminAssignment: {
+        findMany: jest.fn().mockResolvedValue([]),
       },
       project: {
         findUnique: jest.fn().mockImplementation(({ where }) => {
@@ -260,6 +286,7 @@ describe('ProjectsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ProjectsService,
+        JurisdictionService,
         { provide: PrismaService, useValue: mockPrismaService },
       ],
     }).compile();

@@ -11,6 +11,7 @@ import {
   UserRole,
 } from '@prisma/client';
 import { OrganizationsService } from './organizations.service';
+import { JurisdictionService } from '../jurisdiction/jurisdiction.service';
 import { PrismaService } from '../database/prisma.service';
 
 describe('OrganizationsService (Unit)', () => {
@@ -69,6 +70,7 @@ describe('OrganizationsService (Unit)', () => {
       organization: {
         findMany: jest.fn(),
         findUnique: jest.fn(),
+        findFirst: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
         count: jest.fn(),
@@ -77,6 +79,30 @@ describe('OrganizationsService (Unit)', () => {
         findUnique: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      approvalRequest: {
+        create: jest.fn().mockResolvedValue({ id: 'req-1', status: 'PENDING' }),
+        findUnique: jest.fn(),
+        findMany: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        count: jest.fn(),
+      },
+      administrativeArea: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findUnique: jest.fn(),
+        findMany: jest.fn(),
+        create: jest.fn(),
+      },
+      administrativeAreaDistrict: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+      superAdminAssignment: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findUnique: jest.fn(),
+        create: jest.fn(),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       auditLog: {
@@ -88,6 +114,7 @@ describe('OrganizationsService (Unit)', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrganizationsService,
+        JurisdictionService,
         {
           provide: PrismaService,
           useValue: prisma,
@@ -281,8 +308,10 @@ describe('OrganizationsService (Unit)', () => {
       const result = await service.registerOfficer({
         fullName: 'Shri Anand Verma',
         email: 'officer.nagpur@revenue.gov.in',
+        employeeId: 'MAH-REV-9988',
         phone: '+91-9876543210',
         designation: 'Special Land Acquisition Officer',
+        officeAddress: 'Revenue Building, Civil Lines, Nagpur',
         departmentName: 'District Revenue Office Nagpur',
         organizationType: OrganizationType.DISTRICT_AUTHORITY,
         state: 'Maharashtra',
@@ -309,10 +338,14 @@ describe('OrganizationsService (Unit)', () => {
         service.registerOfficer({
           fullName: 'Malicious Actor',
           email: 'hack@gov.in',
+          employeeId: 'HACK-001',
+          phone: '+91-9876543211',
           designation: 'Wannabe Admin',
+          officeAddress: 'Ministry HQ, New Delhi',
           departmentName: 'Ministry',
           organizationType: OrganizationType.CENTRAL_MINISTRY,
           state: 'Delhi',
+          district: 'New Delhi',
           requestedRole: UserRole.SUPER_ADMIN,
           password: 'Password123!',
         }),
@@ -324,10 +357,14 @@ describe('OrganizationsService (Unit)', () => {
         service.registerOfficer({
           fullName: 'PIA Actor',
           email: 'pia@gov.in',
+          employeeId: 'PIA-001',
+          phone: '+91-9876543212',
           designation: 'Contractor',
+          officeAddress: 'Authority Complex, Mumbai',
           departmentName: 'Authority',
           organizationType: OrganizationType.DISTRICT_AUTHORITY,
           state: 'Maharashtra',
+          district: 'Mumbai',
           requestedRole: UserRole.PROJECT_IMPLEMENTING_AGENCY,
           password: 'Password123!',
         }),
@@ -341,10 +378,14 @@ describe('OrganizationsService (Unit)', () => {
         service.registerOfficer({
           fullName: 'Duplicate Officer',
           email: 'existing@revenue.gov.in',
+          employeeId: 'MAH-REV-001',
+          phone: '+91-9876543213',
           designation: 'Officer',
+          officeAddress: 'Secretariat, Mumbai',
           departmentName: 'Revenue Dept',
           organizationType: OrganizationType.STATE_AUTHORITY,
           state: 'Maharashtra',
+          district: 'Mumbai',
           requestedRole: UserRole.STATE_OFFICER,
           password: 'Password123!',
         }),

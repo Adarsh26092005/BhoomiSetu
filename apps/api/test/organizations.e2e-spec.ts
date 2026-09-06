@@ -237,6 +237,37 @@ describe('Organizations Management & PIA Onboarding (e2e)', () => {
           return Promise.resolve(log);
         }),
       },
+      administrativeArea: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'area-mh-01',
+          code: 'MH-01',
+          name: 'Maharashtra Zone',
+          state: 'Maharashtra',
+        }),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      administrativeAreaDistrict: {
+        findFirst: jest.fn().mockResolvedValue({
+          administrativeArea: {
+            id: 'area-mh-01',
+            code: 'MH-01',
+            name: 'Maharashtra Zone',
+            state: 'Maharashtra',
+          },
+        }),
+      },
+      superAdminAssignment: {
+        findMany: jest.fn().mockResolvedValue([{ userId: 'usr-superadmin-001' }]),
+      },
+      approvalRequest: {
+        create: jest.fn().mockImplementation(({ data }) =>
+          Promise.resolve({ id: `req-${Date.now()}`, ...data, status: 'PENDING' }),
+        ),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+      },
       $transaction: jest.fn((cb) => cb(mockPrismaService)),
     };
 
@@ -316,6 +347,7 @@ describe('Organizations Management & PIA Onboarding (e2e)', () => {
           organizationType: OrganizationType.DISTRICT_AUTHORITY,
           state: 'Maharashtra',
           district: 'Nagpur',
+          officeAddress: 'Collectorate Complex, Civil Lines, Nagpur - 440001',
           requestedRole: UserRole.LAND_ACQUISITION_OFFICER,
           password: 'SecureOfficer2026!',
         });

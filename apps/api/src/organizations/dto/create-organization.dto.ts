@@ -44,4 +44,8 @@ export class CreateOrganizationDto {
   @ApiPropertyOptional({ description: 'Administrative boundary GeoJSON or jurisdiction metadata' })
   @IsOptional()
   jurisdiction?: Record<string, any>;
+
+  @ApiPropertyOptional({ example: true, default: true })
+  @IsOptional()
+  isActive?: boolean;
 }

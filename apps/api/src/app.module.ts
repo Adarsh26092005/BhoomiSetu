@@ -7,9 +7,11 @@ import { validateEnv } from './config/env.validation';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
+import { JurisdictionModule } from './jurisdiction/jurisdiction.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { UsersModule } from './users/users.module';
 import { ProjectsModule } from './projects/projects.module';
+import { ParcelsModule } from './parcels/parcels.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 
@@ -24,9 +26,11 @@ import { RolesGuard } from './auth/guards/roles.guard';
     DatabaseModule,
     HealthModule,
     AuthModule,
+    JurisdictionModule,
     OrganizationsModule,
     UsersModule,
     ProjectsModule,
+    ParcelsModule,
   ],
   providers: [
     {
@@ -40,4 +44,3 @@ import { RolesGuard } from './auth/guards/roles.guard';
   ],
 })
 export class AppModule {}
-

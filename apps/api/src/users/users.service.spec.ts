@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { AccountType, UserRole } from '@prisma/client';
 import { UsersService } from './users.service';
+import { JurisdictionService } from '../jurisdiction/jurisdiction.service';
 import { PrismaService } from '../database/prisma.service';
 
 describe('UsersService (Unit)', () => {
@@ -106,6 +107,7 @@ describe('UsersService (Unit)', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UsersService,
+        JurisdictionService,
         {
           provide: PrismaService,
           useValue: prisma,
@@ -339,7 +341,7 @@ describe('UsersService (Unit)', () => {
       expect(result.isActive).toBe(false);
       expect(prisma.auditLog.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ action: 'UPDATE_PROJECT_ASSIGNMENT' }),
+          data: expect.objectContaining({ action: 'DEACTIVATE_PROJECT_ASSIGNMENT' }),
         }),
       );
     });

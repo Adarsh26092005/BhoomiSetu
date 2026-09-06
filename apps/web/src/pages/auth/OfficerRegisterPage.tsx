@@ -31,7 +31,10 @@ const officerRegistrationSchema = z
       .string()
       .min(10, 'Please enter a valid official phone number')
       .max(20),
-    employeeId: z.string().optional(),
+    employeeId: z
+      .string()
+      .min(2, 'Official Employee / Officer ID is required')
+      .max(50),
     designation: z
       .string()
       .min(2, 'Official government designation is required')
@@ -47,8 +50,8 @@ const officerRegistrationSchema = z
       },
     ),
     state: z.string().min(2, 'State of jurisdiction is required'),
-    district: z.string().optional(),
-    officeAddress: z.string().optional(),
+    district: z.string().min(2, 'District of jurisdiction is required'),
+    officeAddress: z.string().min(5, 'Official office address is required'),
     requestedRole: z.enum(
       [
         'LAND_ACQUISITION_OFFICER',
@@ -109,7 +112,6 @@ export function OfficerRegisterPage() {
   const {
     register,
     handleSubmit,
-    watch,
     formState: { errors },
   } = useForm<OfficerRegistrationFormValues>({
     resolver: zodResolver(officerRegistrationSchema),
@@ -129,8 +131,6 @@ export function OfficerRegisterPage() {
       confirmPassword: '',
     },
   });
-
-  const selectedTier = watch('organizationType');
 
   const onSubmit = async (values: OfficerRegistrationFormValues) => {
     setIsSubmitting(true);
@@ -350,7 +350,7 @@ export function OfficerRegisterPage() {
 
                   <div className="space-y-1.5">
                     <label className="text-xs font-semibold text-ink-700">
-                      Officer ID / Employee Code (Optional)
+                      Officer ID / Employee Code <span className="text-rust-600">*</span>
                     </label>
                     <input
                       type="text"
@@ -358,6 +358,9 @@ export function OfficerRegisterPage() {
                       placeholder="e.g. GOV-REV-2026-8941"
                       className="h-9 w-full rounded-md border border-ink-300 bg-paper px-3 text-xs text-ink-900 placeholder:text-ink-400 focus:border-terracotta-500 focus:outline-none focus:ring-1 focus:ring-terracotta-500"
                     />
+                    {errors.employeeId && (
+                      <p className="text-[11px] text-rust-600">{errors.employeeId.message}</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -429,23 +432,24 @@ export function OfficerRegisterPage() {
                     )}
                   </div>
 
-                  {selectedTier === 'DISTRICT_AUTHORITY' && (
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-ink-700">
-                        District Jurisdiction
-                      </label>
-                      <input
-                        type="text"
-                        {...register('district')}
-                        placeholder="e.g. Nagpur"
-                        className="h-9 w-full rounded-md border border-ink-300 bg-paper px-3 text-xs text-ink-900 placeholder:text-ink-400 focus:border-terracotta-500 focus:outline-none focus:ring-1 focus:ring-terracotta-500"
-                      />
-                    </div>
-                  )}
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <label className="text-xs font-semibold text-ink-700">
+                      District Jurisdiction <span className="text-rust-600">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      {...register('district')}
+                      placeholder="e.g. Nagpur"
+                      className="h-9 w-full rounded-md border border-ink-300 bg-paper px-3 text-xs text-ink-900 placeholder:text-ink-400 focus:border-terracotta-500 focus:outline-none focus:ring-1 focus:ring-terracotta-500"
+                    />
+                    {errors.district && (
+                      <p className="text-[11px] text-rust-600">{errors.district.message}</p>
+                    )}
+                  </div>
 
                   <div className="space-y-1.5 sm:col-span-2">
                     <label className="text-xs font-semibold text-ink-700">
-                      Official Office / Postal Address (Optional)
+                      Official Office / Postal Address <span className="text-rust-600">*</span>
                     </label>
                     <input
                       type="text"
@@ -453,6 +457,9 @@ export function OfficerRegisterPage() {
                       placeholder="e.g. Collectorate Compound, Civil Lines, Nagpur - 440001"
                       className="h-9 w-full rounded-md border border-ink-300 bg-paper px-3 text-xs text-ink-900 placeholder:text-ink-400 focus:border-terracotta-500 focus:outline-none focus:ring-1 focus:ring-terracotta-500"
                     />
+                    {errors.officeAddress && (
+                      <p className="text-[11px] text-rust-600">{errors.officeAddress.message}</p>
+                    )}
                   </div>
                 </div>
               </div>

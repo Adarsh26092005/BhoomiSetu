@@ -1,13 +1,24 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
-import { AccountType, OrganizationStatus, OrganizationType, Prisma, UserRole } from '@prisma/client';
+import {
+  AccountType,
+  ApprovalRequestStatus,
+  ApprovalRequestType,
+  OrganizationStatus,
+  OrganizationType,
+  Prisma,
+  UserRole,
+} from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
+import { JurisdictionService } from '../jurisdiction/jurisdiction.service';
+import { AuthenticatedUser } from '../auth/interfaces/jwt-payload.interface';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { PiaRegisterDto } from './dto/pia-register.dto';
@@ -18,6 +29,7 @@ import {
   OrganizationResponseDto,
   PaginatedOrganizationsResponseDto,
 } from './dto/organization-response.dto';
+import { ApprovalDecisionDto } from '../jurisdiction/dto/jurisdiction.dto';
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -25,38 +37,62 @@ const BCRYPT_SALT_ROUNDS = 12;
 export class OrganizationsService {
   private readonly logger = new Logger(OrganizationsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly jurisdictionService: JurisdictionService,
+  ) {}
 
-  async findAll(query: OrganizationQueryDto): Promise<PaginatedOrganizationsResponseDto> {
+  // ============================================================================
+  // 1. LIST ORGANIZATIONS (Jurisdiction-Scoped)
+  // ============================================================================
+
+  async findAll(
+    query: OrganizationQueryDto,
+    actor?: AuthenticatedUser,
+  ): Promise<PaginatedOrganizationsResponseDto> {
     const page = Math.max(1, Number(query.page) || 1);
     const limit = Math.min(100, Math.max(1, Number(query.limit) || 20));
     const skip = (page - 1) * limit;
 
-    const where: Prisma.OrganizationWhereInput = {};
+    const andConditions: Prisma.OrganizationWhereInput[] = [];
+
+    // Apply actor jurisdiction scoping if caller is authenticated
+    if (actor) {
+      const scope = await this.jurisdictionService.resolveEffectiveScope(actor);
+      const scopeWhere = this.jurisdictionService.buildOrganizationWhere(scope);
+      if (Object.keys(scopeWhere).length > 0) {
+        andConditions.push(scopeWhere);
+      }
+    }
 
     if (query.type) {
-      where.type = query.type;
+      andConditions.push({ type: query.type });
     }
 
     if (query.status) {
-      where.status = query.status;
+      andConditions.push({ status: query.status });
     }
 
     if (query.state) {
-      where.state = { contains: query.state, mode: 'insensitive' };
+      andConditions.push({ state: { contains: query.state, mode: 'insensitive' } });
     }
 
     if (query.district) {
-      where.district = { contains: query.district, mode: 'insensitive' };
+      andConditions.push({ district: { contains: query.district, mode: 'insensitive' } });
     }
 
     if (query.search) {
       const searchTerm = query.search.trim();
-      where.OR = [
-        { name: { contains: searchTerm, mode: 'insensitive' } },
-        { code: { contains: searchTerm, mode: 'insensitive' } },
-      ];
+      andConditions.push({
+        OR: [
+          { name: { contains: searchTerm, mode: 'insensitive' } },
+          { code: { contains: searchTerm, mode: 'insensitive' } },
+        ],
+      });
     }
+
+    const where: Prisma.OrganizationWhereInput =
+      andConditions.length > 0 ? { AND: andConditions } : {};
 
     const [total, items] = await Promise.all([
       this.prisma.organization.count({ where }),
@@ -156,7 +192,7 @@ export class OrganizationsService {
         district: dto.district || null,
         parentId: dto.parentId || null,
         jurisdiction: dto.jurisdiction || Prisma.JsonNull,
-        isActive: dto.status !== OrganizationStatus.SUSPENDED && dto.status !== OrganizationStatus.REJECTED,
+        isActive: dto.isActive !== undefined ? dto.isActive : true,
       },
       include: {
         _count: {
@@ -174,7 +210,7 @@ export class OrganizationsService {
       entityType: 'Organization',
       entityId: org.id,
       organizationId: org.id,
-      newState: { name: org.name, type: org.type, status: org.status },
+      newState: { name: org.name, code: org.code, type: org.type, status: org.status },
     });
 
     return this.mapToResponse(org);
@@ -238,10 +274,15 @@ export class OrganizationsService {
     return this.mapToResponse(updated);
   }
 
+  // ============================================================================
+  // 2. SELF-REGISTRATION WITH ROUTED APPROVAL REQUESTS
+  // ============================================================================
+
   async registerPia(dto: PiaRegisterDto): Promise<{
     message: string;
     organization: OrganizationResponseDto;
     initialUser: { id: string; email: string; fullName: string; role: string; isActive: boolean };
+    approvalRequestId?: string;
   }> {
     const email = dto.adminEmail.trim().toLowerCase();
 
@@ -262,6 +303,17 @@ export class OrganizationsService {
         );
       }
     }
+
+    // Resolve Area & Approvers
+    const targetArea = await this.jurisdictionService.findAreaByStateAndDistrict(
+      dto.state || '',
+      dto.district || undefined,
+    );
+    const approverIds = await this.jurisdictionService.findApproversForArea(
+      targetArea?.id,
+      dto.state,
+      dto.district,
+    );
 
     const passwordHash = await bcrypt.hash(dto.adminPassword, BCRYPT_SALT_ROUNDS);
 
@@ -301,6 +353,28 @@ export class OrganizationsService {
         },
       });
 
+      // Create explicit ApprovalRequest routed to AdministrativeArea
+      const approvalReq = await tx.approvalRequest.create({
+        data: {
+          requestType: ApprovalRequestType.PIA_REGISTRATION,
+          requesterUserId: user.id,
+          organizationId: org.id,
+          state: dto.state || 'National',
+          district: dto.district || null,
+          administrativeAreaId: targetArea?.id || null,
+          assignedApproverId: approverIds[0] || null,
+          status: ApprovalRequestStatus.PENDING,
+          metadata: {
+            registrationCode: dto.registrationCode,
+            organizationName: dto.organizationName,
+            adminFullName: dto.adminFullName,
+            adminDesignation: dto.adminDesignation,
+            adminEmail: email,
+            officeAddress: dto.officeAddress,
+          },
+        },
+      });
+
       await tx.auditLog.create({
         data: {
           action: 'PIA_REGISTRATION_SUBMITTED',
@@ -311,15 +385,17 @@ export class OrganizationsService {
             organizationName: org.name,
             adminEmail: user.email,
             status: org.status,
+            approvalRequestId: approvalReq.id,
+            administrativeAreaId: targetArea?.id,
           },
         },
       });
 
-      return { org, user };
+      return { org, user, approvalReq };
     });
 
     this.logger.log(
-      `New PIA registration submitted: "${dto.organizationName}" (${email}) - Pending Review`,
+      `New PIA registration submitted: "${dto.organizationName}" (${email}) - Routed to Area: ${targetArea?.code || 'Central'}`,
     );
 
     return {
@@ -333,6 +409,7 @@ export class OrganizationsService {
         role: result.user.role,
         isActive: result.user.isActive,
       },
+      approvalRequestId: result.approvalReq.id,
     };
   }
 
@@ -340,6 +417,7 @@ export class OrganizationsService {
     message: string;
     organization: OrganizationResponseDto;
     user: { id: string; email: string; fullName: string; role: string; accountType: string; isActive: boolean };
+    approvalRequestId?: string;
   }> {
     const email = dto.email.trim().toLowerCase();
 
@@ -365,6 +443,17 @@ export class OrganizationsService {
     if (existingUser) {
       throw new ConflictException('A user with this email address already exists');
     }
+
+    // Resolve Area & Approvers based on State + District
+    const targetArea = await this.jurisdictionService.findAreaByStateAndDistrict(
+      dto.state,
+      dto.district,
+    );
+    const approverIds = await this.jurisdictionService.findApproversForArea(
+      targetArea?.id,
+      dto.state,
+      dto.district,
+    );
 
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS);
 
@@ -422,6 +511,29 @@ export class OrganizationsService {
         },
       });
 
+      // Create ApprovalRequest record explicitly routed to target AdministrativeArea
+      const approvalReq = await tx.approvalRequest.create({
+        data: {
+          requestType: ApprovalRequestType.OFFICER_REGISTRATION,
+          requesterUserId: user.id,
+          organizationId: org.id,
+          state: dto.state,
+          district: dto.district,
+          administrativeAreaId: targetArea?.id || null,
+          assignedApproverId: approverIds[0] || null,
+          status: ApprovalRequestStatus.PENDING,
+          metadata: {
+            employeeId: dto.employeeId,
+            requestedRole: dto.requestedRole,
+            designation: dto.designation,
+            departmentName: dto.departmentName,
+            officeAddress: dto.officeAddress,
+            phone: dto.phone,
+            organizationType: dto.organizationType,
+          },
+        },
+      });
+
       // Audit log the officer access request
       await tx.auditLog.create({
         data: {
@@ -438,15 +550,17 @@ export class OrganizationsService {
             organizationType: org.type,
             state: org.state,
             district: org.district,
+            approvalRequestId: approvalReq.id,
+            administrativeAreaId: targetArea?.id,
           },
         },
       });
 
-      return { org, user };
+      return { org, user, approvalReq };
     });
 
     this.logger.log(
-      `New Government Officer access request submitted: "${dto.fullName}" <${email}> (${dto.requestedRole}) - Pending Approval`,
+      `New Government Officer access request submitted: "${dto.fullName}" <${email}> (${dto.requestedRole}) - Routed to Area: ${targetArea?.code || 'Central'}`,
     );
 
     return {
@@ -461,8 +575,309 @@ export class OrganizationsService {
         accountType: result.user.accountType,
         isActive: result.user.isActive,
       },
+      approvalRequestId: result.approvalReq.id,
     };
   }
+
+  // ============================================================================
+  // 3. APPROVAL REQUEST MANAGEMENT (AREA-SCOPED)
+  // ============================================================================
+
+  async listApprovalRequests(
+    query: { status?: ApprovalRequestStatus; page?: number; limit?: number },
+    actor: AuthenticatedUser,
+  ) {
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(query.limit) || 20));
+    const skip = (page - 1) * limit;
+
+    const scope = await this.jurisdictionService.resolveEffectiveScope(actor);
+    const scopeWhere = this.jurisdictionService.buildApprovalRequestWhere(scope);
+
+    const andConditions: Prisma.ApprovalRequestWhereInput[] = [];
+    if (Object.keys(scopeWhere).length > 0) {
+      andConditions.push(scopeWhere);
+    }
+    if (query.status) {
+      andConditions.push({ status: query.status });
+    }
+
+    const where: Prisma.ApprovalRequestWhereInput =
+      andConditions.length > 0 ? { AND: andConditions } : {};
+
+    const [total, items] = await Promise.all([
+      this.prisma.approvalRequest.count({ where }),
+      this.prisma.approvalRequest.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: [{ submittedAt: 'desc' }],
+        include: {
+          requesterUser: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              phone: true,
+              role: true,
+              designation: true,
+            },
+          },
+          organization: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+              type: true,
+              status: true,
+              state: true,
+              district: true,
+            },
+          },
+          administrativeArea: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              state: true,
+            },
+          },
+          reviewedBy: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 1,
+    };
+  }
+
+  async getApprovalRequest(id: string, actor: AuthenticatedUser) {
+    const request = await this.prisma.approvalRequest.findUnique({
+      where: { id },
+      include: {
+        requesterUser: true,
+        organization: true,
+        administrativeArea: {
+          include: { districts: true },
+        },
+        reviewedBy: {
+          select: { id: true, fullName: true, email: true },
+        },
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException(`Approval request with ID "${id}" not found`);
+    }
+
+    const scope = await this.jurisdictionService.resolveEffectiveScope(actor);
+    if (!this.jurisdictionService.canAccessApprovalRequest(scope, request)) {
+      throw new ForbiddenException(
+        'Forbidden: You do not have jurisdictional authority to view this approval request',
+      );
+    }
+
+    return request;
+  }
+
+  async approveApprovalRequest(
+    id: string,
+    dto: ApprovalDecisionDto,
+    actor: AuthenticatedUser,
+  ) {
+    const request = await this.prisma.approvalRequest.findUnique({
+      where: { id },
+      include: {
+        requesterUser: true,
+        organization: true,
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException(`Approval request with ID "${id}" not found`);
+    }
+
+    const scope = await this.jurisdictionService.resolveEffectiveScope(actor);
+    if (!this.jurisdictionService.canAccessApprovalRequest(scope, request)) {
+      throw new ForbiddenException(
+        'Forbidden: You do not have jurisdictional authority to approve this request',
+      );
+    }
+
+    if (request.status !== ApprovalRequestStatus.PENDING) {
+      throw new BadRequestException(
+        `Approval request is not in PENDING status (current: ${request.status})`,
+      );
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      // 1. Update ApprovalRequest status
+      const updatedReq = await tx.approvalRequest.update({
+        where: { id },
+        data: {
+          status: ApprovalRequestStatus.APPROVED,
+          reviewedAt: new Date(),
+          reviewedById: actor.id,
+          rejectionReason: null,
+          metadata: {
+            ...((request.metadata as Record<string, any>) || {}),
+            approvalRemarks: dto.remarks || 'Approved by authorized jurisdiction administrator.',
+          },
+        },
+      });
+
+      // 2. Activate User if Officer registration
+      if (request.requesterUserId) {
+        await tx.user.update({
+          where: { id: request.requesterUserId },
+          data: { isActive: true },
+        });
+      }
+
+      // 3. Activate Organization if PIA or pending Gov Org
+      if (request.organizationId) {
+        await tx.organization.update({
+          where: { id: request.organizationId },
+          data: {
+            status: OrganizationStatus.ACTIVE,
+            isActive: true,
+          },
+        });
+
+        // If PIA registration, also activate any primary users
+        if (request.requestType === ApprovalRequestType.PIA_REGISTRATION) {
+          await tx.user.updateMany({
+            where: { organizationId: request.organizationId },
+            data: { isActive: true },
+          });
+        }
+      }
+
+      // 4. Record Audit Log
+      await tx.auditLog.create({
+        data: {
+          actorId: actor.id,
+          action: 'APPROVE_ONBOARDING_REQUEST',
+          entityType: 'ApprovalRequest',
+          entityId: id,
+          organizationId: request.organizationId || null,
+          previousState: { status: request.status },
+          newState: {
+            status: ApprovalRequestStatus.APPROVED,
+            requestType: request.requestType,
+            reviewedBy: actor.id,
+            remarks: dto.remarks,
+          },
+        },
+      });
+
+      return updatedReq;
+    });
+
+    this.logger.log(
+      `ApprovalRequest "${id}" (${request.requestType}) approved by ${actor.email}`,
+    );
+
+    return updated;
+  }
+
+  async rejectApprovalRequest(
+    id: string,
+    dto: ApprovalDecisionDto,
+    actor: AuthenticatedUser,
+  ) {
+    const request = await this.prisma.approvalRequest.findUnique({
+      where: { id },
+      include: {
+        organization: true,
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException(`Approval request with ID "${id}" not found`);
+    }
+
+    const scope = await this.jurisdictionService.resolveEffectiveScope(actor);
+    if (!this.jurisdictionService.canAccessApprovalRequest(scope, request)) {
+      throw new ForbiddenException(
+        'Forbidden: You do not have jurisdictional authority to reject this request',
+      );
+    }
+
+    if (request.status !== ApprovalRequestStatus.PENDING) {
+      throw new BadRequestException(
+        `Only requests in PENDING status can be rejected (current: ${request.status})`,
+      );
+    }
+
+    const rejectionReason =
+      dto.rejectionReason || dto.remarks || 'Rejected by authorized jurisdiction administrator.';
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const updatedReq = await tx.approvalRequest.update({
+        where: { id },
+        data: {
+          status: ApprovalRequestStatus.REJECTED,
+          reviewedAt: new Date(),
+          reviewedById: actor.id,
+          rejectionReason,
+        },
+      });
+
+      if (
+        request.requestType === ApprovalRequestType.PIA_REGISTRATION &&
+        request.organizationId
+      ) {
+        await tx.organization.update({
+          where: { id: request.organizationId },
+          data: {
+            status: OrganizationStatus.REJECTED,
+            isActive: false,
+          },
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          actorId: actor.id,
+          action: 'REJECT_ONBOARDING_REQUEST',
+          entityType: 'ApprovalRequest',
+          entityId: id,
+          organizationId: request.organizationId || null,
+          previousState: { status: request.status },
+          newState: {
+            status: ApprovalRequestStatus.REJECTED,
+            requestType: request.requestType,
+            reviewedBy: actor.id,
+            rejectionReason,
+          },
+        },
+      });
+
+      return updatedReq;
+    });
+
+    this.logger.warn(
+      `ApprovalRequest "${id}" (${request.requestType}) rejected by ${actor.email}`,
+    );
+
+    return updated;
+  }
+
+  // ============================================================================
+  // 4. PIA DIRECT APPROVAL / REJECTION (Legacy compatibility with ApprovalRequest link)
+  // ============================================================================
 
   async approvePia(
     id: string,
@@ -496,6 +911,16 @@ export class OrganizationsService {
       await tx.user.updateMany({
         where: { organizationId: id },
         data: { isActive: true },
+      });
+
+      // Update any pending ApprovalRequest for this org
+      await tx.approvalRequest.updateMany({
+        where: { organizationId: id, status: ApprovalRequestStatus.PENDING },
+        data: {
+          status: ApprovalRequestStatus.APPROVED,
+          reviewedAt: new Date(),
+          reviewedById: actorId,
+        },
       });
 
       await tx.auditLog.create({
@@ -542,6 +967,17 @@ export class OrganizationsService {
         },
         include: {
           _count: { select: { users: true, projects: true } },
+        },
+      });
+
+      // Update any pending ApprovalRequest for this org
+      await tx.approvalRequest.updateMany({
+        where: { organizationId: id, status: ApprovalRequestStatus.PENDING },
+        data: {
+          status: ApprovalRequestStatus.REJECTED,
+          reviewedAt: new Date(),
+          reviewedById: actorId,
+          rejectionReason: dto.rejectionReason || dto.remarks,
         },
       });
 
@@ -654,6 +1090,10 @@ export class OrganizationsService {
     this.logger.log(`Organization "${org.name}" (${id}) activated by actor ${actorId}`);
     return this.mapToResponse(updated);
   }
+
+  // ============================================================================
+  // RESPONSE MAPPERS & AUDIT
+  // ============================================================================
 
   private mapToResponse(org: any): OrganizationResponseDto {
     return {

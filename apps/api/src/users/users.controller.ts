@@ -18,6 +18,7 @@ import {
 import { AccountType, UserRole } from '@prisma/client';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { AuthenticatedUser } from '../auth/interfaces/jwt-payload.interface';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -42,22 +43,25 @@ export class UsersController {
   @ApiOperation({
     summary: 'List and Filter Users',
     description:
-      'Retrieve paginated users with filtering by accountType, role, organization, active status, and search keywords.',
+      'Retrieve paginated users with filtering by accountType, role, organization, active status, and search keywords, strictly scoped to caller jurisdiction.',
   })
   @ApiResponse({
     status: 200,
     description: 'Paginated user directory.',
     type: PaginatedUsersResponseDto,
   })
-  async findAll(@Query() query: UserQueryDto): Promise<PaginatedUsersResponseDto> {
-    return this.usersService.findAll(query);
+  async findAll(
+    @Query() query: UserQueryDto,
+    @CurrentUser() actor?: AuthenticatedUser,
+  ): Promise<PaginatedUsersResponseDto> {
+    return this.usersService.findAll(query, actor);
   }
 
   @Get(':id')
   @ApiOperation({
     summary: 'Get User Profile and Active Project Assignments',
     description:
-      'Returns complete user profile details along with active project assignments and organization metadata.',
+      'Returns complete user profile details along with active project assignments and organization metadata with jurisdiction enforcement.',
   })
   @ApiResponse({
     status: 200,
@@ -68,8 +72,11 @@ export class UsersController {
     status: 404,
     description: 'User not found.',
   })
-  async findOne(@Param('id') id: string): Promise<UserDetailResponseDto> {
-    return this.usersService.findOne(id);
+  async findOne(
+    @Param('id') id: string,
+    @CurrentUser() actor?: AuthenticatedUser,
+  ): Promise<UserDetailResponseDto> {
+    return this.usersService.findOne(id, actor);
   }
 
   @Post()
@@ -104,17 +111,15 @@ export class UsersController {
   })
   async create(
     @Body() dto: CreateUserDto,
-    @CurrentUser('id') actorId: string,
-    @CurrentUser('role') actorRole: UserRole,
-    @CurrentUser('accountType') actorAccountType: AccountType,
-    @CurrentUser('organizationId') actorOrgId: string,
+    @CurrentUser() actor: AuthenticatedUser,
   ): Promise<UserDetailResponseDto> {
     return this.usersService.create(
       dto,
-      actorId,
-      actorRole,
-      actorAccountType,
-      actorOrgId,
+      actor.id,
+      actor.role,
+      actor.accountType,
+      actor.organizationId,
+      actor,
     );
   }
 
@@ -147,10 +152,9 @@ export class UsersController {
   async update(
     @Param('id') id: string,
     @Body() dto: UpdateUserDto,
-    @CurrentUser('id') actorId: string,
-    @CurrentUser('role') actorRole: UserRole,
+    @CurrentUser() actor: AuthenticatedUser,
   ): Promise<UserDetailResponseDto> {
-    return this.usersService.update(id, dto, actorId, actorRole);
+    return this.usersService.update(id, dto, actor.id, actor.role, actor);
   }
 
   @Post(':id/activate')
@@ -172,9 +176,9 @@ export class UsersController {
   })
   async activate(
     @Param('id') id: string,
-    @CurrentUser('id') actorId: string,
+    @CurrentUser() actor: AuthenticatedUser,
   ): Promise<UserDetailResponseDto> {
-    return this.usersService.activate(id, actorId);
+    return this.usersService.activate(id, actor.id, actor);
   }
 
   @Post(':id/deactivate')
@@ -197,9 +201,9 @@ export class UsersController {
   })
   async deactivate(
     @Param('id') id: string,
-    @CurrentUser('id') actorId: string,
+    @CurrentUser() actor: AuthenticatedUser,
   ): Promise<UserDetailResponseDto> {
-    return this.usersService.deactivate(id, actorId);
+    return this.usersService.deactivate(id, actor.id, actor);
   }
 
   // ============================================================================
@@ -244,9 +248,9 @@ export class UsersController {
   async assignToProject(
     @Param('id') id: string,
     @Body() dto: CreateProjectAssignmentDto,
-    @CurrentUser('id') actorId: string,
+    @CurrentUser() actor: AuthenticatedUser,
   ): Promise<ProjectAssignmentResponseDto> {
-    return this.usersService.assignToProject(id, dto, actorId);
+    return this.usersService.assignToProject(id, dto, actor.id, actor);
   }
 
   @Patch(':id/project-assignments/:assignmentId')

@@ -9,6 +9,8 @@ import {
 import * as bcrypt from 'bcrypt';
 import { AccountType, Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
+import { JurisdictionService } from '../jurisdiction/jurisdiction.service';
+import { AuthenticatedUser } from '../auth/interfaces/jwt-payload.interface';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserQueryDto } from './dto/user-query.dto';
@@ -28,39 +30,59 @@ const BCRYPT_SALT_ROUNDS = 12;
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly jurisdictionService: JurisdictionService,
+  ) {}
 
-  async findAll(query: UserQueryDto): Promise<PaginatedUsersResponseDto> {
+  async findAll(
+    query: UserQueryDto,
+    actor?: AuthenticatedUser,
+  ): Promise<PaginatedUsersResponseDto> {
     const page = Math.max(1, Number(query.page) || 1);
     const limit = Math.min(100, Math.max(1, Number(query.limit) || 20));
     const skip = (page - 1) * limit;
 
-    const where: Prisma.UserWhereInput = {};
+    const andConditions: Prisma.UserWhereInput[] = [];
+
+    // Apply Jurisdiction Scoping
+    if (actor) {
+      const scope = await this.jurisdictionService.resolveEffectiveScope(actor);
+      const scopeWhere = this.jurisdictionService.buildUserWhere(scope);
+      if (Object.keys(scopeWhere).length > 0) {
+        andConditions.push(scopeWhere);
+      }
+    }
 
     if (query.accountType) {
-      where.accountType = query.accountType;
+      andConditions.push({ accountType: query.accountType });
     }
 
     if (query.role) {
-      where.role = query.role;
+      andConditions.push({ role: query.role });
     }
 
     if (query.organizationId) {
-      where.organizationId = query.organizationId;
+      andConditions.push({ organizationId: query.organizationId });
     }
 
     if (query.isActive !== undefined) {
-      where.isActive = query.isActive;
+      andConditions.push({ isActive: query.isActive });
     }
 
     if (query.search) {
       const searchTerm = query.search.trim();
-      where.OR = [
-        { fullName: { contains: searchTerm, mode: 'insensitive' } },
-        { email: { contains: searchTerm, mode: 'insensitive' } },
-        { designation: { contains: searchTerm, mode: 'insensitive' } },
-      ];
+      andConditions.push({
+        OR: [
+          { fullName: { contains: searchTerm, mode: 'insensitive' } },
+          { email: { contains: searchTerm, mode: 'insensitive' } },
+          { designation: { contains: searchTerm, mode: 'insensitive' } },
+        ],
+      });
     }
+
+    const where: Prisma.UserWhereInput =
+      andConditions.length > 0 ? { AND: andConditions } : {};
 
     const [total, items] = await Promise.all([
       this.prisma.user.count({ where }),
@@ -98,7 +120,10 @@ export class UsersService {
     };
   }
 
-  async findOne(id: string): Promise<UserDetailResponseDto> {
+  async findOne(
+    id: string,
+    actor?: AuthenticatedUser,
+  ): Promise<UserDetailResponseDto> {
     const user = await this.prisma.user.findUnique({
       where: { id },
       include: {
@@ -124,6 +149,15 @@ export class UsersService {
       throw new NotFoundException(`User with ID "${id}" not found`);
     }
 
+    if (actor) {
+      const scope = await this.jurisdictionService.resolveEffectiveScope(actor);
+      if (!this.jurisdictionService.canAccessUser(scope, user)) {
+        throw new ForbiddenException(
+          'Forbidden: You do not have jurisdictional authority to view this user profile',
+        );
+      }
+    }
+
     return this.mapToUserResponse(user);
   }
 
@@ -133,6 +167,7 @@ export class UsersService {
     actorRole?: UserRole,
     actorAccountType?: AccountType,
     actorOrgId?: string,
+    actor?: AuthenticatedUser,
   ): Promise<UserDetailResponseDto> {
     const email = dto.email.trim().toLowerCase();
 
@@ -158,16 +193,26 @@ export class UsersService {
       }
     }
 
-    const existing = await this.prisma.user.findUnique({ where: { email } });
-    if (existing) {
-      throw new ConflictException(`A user with email "${email}" already exists`);
-    }
-
     const org = await this.prisma.organization.findUnique({
       where: { id: dto.organizationId },
     });
     if (!org) {
       throw new BadRequestException(`Organization with ID "${dto.organizationId}" does not exist`);
+    }
+
+    // Check actor jurisdiction over target organization
+    if (actor) {
+      const scope = await this.jurisdictionService.resolveEffectiveScope(actor);
+      if (!this.jurisdictionService.canAccessOrganization(scope, org)) {
+        throw new ForbiddenException(
+          'Forbidden: You do not have jurisdictional authority to create users in this organization',
+        );
+      }
+    }
+
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      throw new ConflictException(`A user with email "${email}" already exists`);
     }
 
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS);
@@ -212,10 +257,24 @@ export class UsersService {
     dto: UpdateUserDto,
     actorId?: string,
     actorRole?: UserRole,
+    actor?: AuthenticatedUser,
   ): Promise<UserDetailResponseDto> {
-    const existing = await this.prisma.user.findUnique({ where: { id } });
+    const existing = await this.prisma.user.findUnique({
+      where: { id },
+      include: { organization: true },
+    });
     if (!existing) {
       throw new NotFoundException(`User with ID "${id}" not found`);
+    }
+
+    // Jurisdiction check
+    if (actor) {
+      const scope = await this.jurisdictionService.resolveEffectiveScope(actor);
+      if (!this.jurisdictionService.canAccessUser(scope, existing)) {
+        throw new ForbiddenException(
+          'Forbidden: You do not have jurisdictional authority to update this user',
+        );
+      }
     }
 
     // Security Rule: Non-superadmin cannot self-elevate role or modify privileged roles arbitrarily
@@ -271,10 +330,26 @@ export class UsersService {
     return this.mapToUserResponse(updated);
   }
 
-  async activate(id: string, actorId: string): Promise<UserDetailResponseDto> {
-    const user = await this.prisma.user.findUnique({ where: { id } });
+  async activate(
+    id: string,
+    actorId: string,
+    actor?: AuthenticatedUser,
+  ): Promise<UserDetailResponseDto> {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      include: { organization: true },
+    });
     if (!user) {
       throw new NotFoundException(`User with ID "${id}" not found`);
+    }
+
+    if (actor) {
+      const scope = await this.jurisdictionService.resolveEffectiveScope(actor);
+      if (!this.jurisdictionService.canAccessUser(scope, user)) {
+        throw new ForbiddenException(
+          'Forbidden: You do not have jurisdictional authority to activate this user',
+        );
+      }
     }
 
     const updated = await this.prisma.user.update({
@@ -296,10 +371,26 @@ export class UsersService {
     return this.mapToUserResponse(updated);
   }
 
-  async deactivate(id: string, actorId: string): Promise<UserDetailResponseDto> {
-    const user = await this.prisma.user.findUnique({ where: { id } });
+  async deactivate(
+    id: string,
+    actorId: string,
+    actor?: AuthenticatedUser,
+  ): Promise<UserDetailResponseDto> {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      include: { organization: true },
+    });
     if (!user) {
       throw new NotFoundException(`User with ID "${id}" not found`);
+    }
+
+    if (actor) {
+      const scope = await this.jurisdictionService.resolveEffectiveScope(actor);
+      if (!this.jurisdictionService.canAccessUser(scope, user)) {
+        throw new ForbiddenException(
+          'Forbidden: You do not have jurisdictional authority to deactivate this user',
+        );
+      }
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -378,15 +469,37 @@ export class UsersService {
     userId: string,
     dto: CreateProjectAssignmentDto,
     actorId: string,
+    actor?: AuthenticatedUser,
   ): Promise<ProjectAssignmentResponseDto> {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { organization: true },
+    });
     if (!user) {
       throw new NotFoundException(`User "${userId}" not found`);
     }
 
-    const project = await this.prisma.project.findUnique({ where: { id: dto.projectId } });
+    const project = await this.prisma.project.findUnique({
+      where: { id: dto.projectId },
+      include: { assignments: true },
+    });
     if (!project) {
       throw new NotFoundException(`Project "${dto.projectId}" not found`);
+    }
+
+    // Jurisdiction check on both user and project
+    if (actor) {
+      const scope = await this.jurisdictionService.resolveEffectiveScope(actor);
+      if (!this.jurisdictionService.canAccessUser(scope, user)) {
+        throw new ForbiddenException(
+          'Forbidden: You do not have authority to assign users outside your jurisdiction',
+        );
+      }
+      if (!this.jurisdictionService.canAccessProject(scope, project)) {
+        throw new ForbiddenException(
+          'Forbidden: You do not have authority over this project jurisdiction',
+        );
+      }
     }
 
     const assignment = await this.prisma.projectAssignment.upsert({
@@ -453,20 +566,34 @@ export class UsersService {
     dto: UpdateProjectAssignmentDto,
     actorId: string,
   ): Promise<ProjectAssignmentResponseDto> {
-    const assignment = await this.prisma.projectAssignment.findUnique({
+    const existing = await this.prisma.projectAssignment.findUnique({
       where: { id: assignmentId },
-      include: { project: true },
+      include: {
+        project: {
+          select: {
+            id: true,
+            code: true,
+            title: true,
+            status: true,
+            state: true,
+          },
+        },
+      },
     });
 
-    if (!assignment || assignment.userId !== userId) {
-      throw new NotFoundException(`Assignment "${assignmentId}" not found for user "${userId}"`);
+    if (!existing) {
+      throw new NotFoundException(`Project assignment "${assignmentId}" not found`);
+    }
+
+    if (existing.userId !== userId) {
+      throw new BadRequestException('Project assignment does not belong to the specified user');
     }
 
     const updated = await this.prisma.projectAssignment.update({
       where: { id: assignmentId },
       data: {
-        role: dto.role || assignment.role,
-        isActive: dto.isActive !== undefined ? dto.isActive : assignment.isActive,
+        role: dto.role || existing.role,
+        isActive: dto.isActive !== undefined ? dto.isActive : existing.isActive,
       },
       include: {
         project: {
@@ -486,6 +613,7 @@ export class UsersService {
       action: 'UPDATE_PROJECT_ASSIGNMENT',
       entityType: 'ProjectAssignment',
       entityId: assignmentId,
+      previousState: { role: existing.role, isActive: existing.isActive },
       newState: { role: updated.role, isActive: updated.isActive },
     });
 
@@ -506,8 +634,69 @@ export class UsersService {
     assignmentId: string,
     actorId: string,
   ): Promise<ProjectAssignmentResponseDto> {
-    return this.updateProjectAssignment(userId, assignmentId, { isActive: false }, actorId);
+    const existing = await this.prisma.projectAssignment.findUnique({
+      where: { id: assignmentId },
+      include: {
+        project: {
+          select: {
+            id: true,
+            code: true,
+            title: true,
+            status: true,
+            state: true,
+          },
+        },
+      },
+    });
+
+    if (!existing) {
+      throw new NotFoundException(`Project assignment "${assignmentId}" not found`);
+    }
+
+    if (existing.userId !== userId) {
+      throw new BadRequestException('Project assignment does not belong to the specified user');
+    }
+
+    const updated = await this.prisma.projectAssignment.update({
+      where: { id: assignmentId },
+      data: { isActive: false },
+      include: {
+        project: {
+          select: {
+            id: true,
+            code: true,
+            title: true,
+            status: true,
+            state: true,
+          },
+        },
+      },
+    });
+
+    await this.logAudit({
+      actorId,
+      action: 'DEACTIVATE_PROJECT_ASSIGNMENT',
+      entityType: 'ProjectAssignment',
+      entityId: assignmentId,
+      previousState: { isActive: existing.isActive },
+      newState: { isActive: false },
+    });
+
+    return {
+      id: updated.id,
+      projectId: updated.projectId,
+      project: updated.project,
+      userId: updated.userId,
+      role: updated.role,
+      assignedById: updated.assignedById,
+      isActive: updated.isActive,
+      assignedAt: updated.assignedAt,
+    };
   }
+
+  // ============================================================================
+  // RESPONSE MAPPERS
+  // ============================================================================
 
   private mapToUserResponse(user: any): UserDetailResponseDto {
     return {
@@ -528,17 +717,36 @@ export class UsersService {
             status: user.organization.status,
             state: user.organization.state || null,
             district: user.organization.district || null,
-            isActive: user.organization.isActive,
-            createdAt: user.organization.createdAt,
-            updatedAt: user.organization.updatedAt,
+            isActive: user.organization.isActive ?? true,
+            createdAt: user.organization.createdAt ?? new Date(),
+            updatedAt: user.organization.updatedAt ?? new Date(),
           }
         : undefined,
       avatarUrl: user.avatarUrl || null,
       isActive: user.isActive,
       lastLoginAt: user.lastLoginAt || null,
-      projectAssignments: user.projectAssignments,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
+      projectAssignments: user.projectAssignments
+        ? user.projectAssignments.map((a: any) => ({
+            id: a.id,
+            projectId: a.projectId,
+            project: a.project
+              ? {
+                  id: a.project.id,
+                  code: a.project.code,
+                  title: a.project.title,
+                  status: a.project.status,
+                  state: a.project.state,
+                }
+              : undefined,
+            userId: a.userId,
+            role: a.role,
+            assignedById: a.assignedById,
+            isActive: a.isActive,
+            assignedAt: a.assignedAt,
+          }))
+        : undefined,
     };
   }
 

@@ -15,6 +15,7 @@ import {
   UserRole,
 } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
+import { JurisdictionService } from '../jurisdiction/jurisdiction.service';
 import { AuthenticatedUser } from '../auth/interfaces/jwt-payload.interface';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
@@ -135,7 +136,10 @@ const ALLOWED_TRANSITIONS: Record<ProjectStatus, ProjectStatus[]> = {
 export class ProjectsService {
   private readonly logger = new Logger(ProjectsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly jurisdictionService: JurisdictionService,
+  ) {}
 
   // ============================================================================
   // 1. LIST PROJECTS (Multi-Tenant & Geographical Scoping)
@@ -149,8 +153,8 @@ export class ProjectsService {
     const limit = Math.min(100, Math.max(1, Number(query.limit) || 20));
     const skip = (page - 1) * limit;
 
-    const actorOrg = await this.getActorOrganization(actor.organizationId);
-    const scopeWhere = this.buildScopeFilter(actor, actorOrg);
+    const scope = await this.jurisdictionService.resolveEffectiveScope(actor);
+    const scopeWhere = this.jurisdictionService.buildProjectWhere(scope);
 
     const where: Prisma.ProjectWhereInput = {
       AND: [scopeWhere],
@@ -304,7 +308,7 @@ export class ProjectsService {
     }
 
     // Enforce Boundary Check
-    this.assertProjectAccess(project, actor, actorOrg);
+    await this.assertProjectAccess(project, actor, actorOrg);
 
     return this.mapToProjectDetailResponse(project);
   }
@@ -468,7 +472,7 @@ export class ProjectsService {
       throw new NotFoundException(`Project with ID "${id}" not found`);
     }
 
-    this.assertProjectAccess(existing, actor, actorOrg);
+    await this.assertProjectAccess(existing, actor, actorOrg);
 
     const updated = await this.prisma.project.update({
       where: { id },
@@ -566,7 +570,7 @@ export class ProjectsService {
       throw new NotFoundException(`Project with ID "${id}" not found`);
     }
 
-    this.assertProjectAccess(existing, actor, actorOrg);
+    await this.assertProjectAccess(existing, actor, actorOrg);
 
     const currentStatus = existing.status;
     const targetStatus = dto.status;
@@ -658,8 +662,8 @@ export class ProjectsService {
   // ============================================================================
 
   async getSummary(actor: AuthenticatedUser): Promise<ProjectSummaryKpiDto> {
-    const actorOrg = await this.getActorOrganization(actor.organizationId);
-    const scopeWhere = this.buildScopeFilter(actor, actorOrg);
+    const scope = await this.jurisdictionService.resolveEffectiveScope(actor);
+    const scopeWhere = this.jurisdictionService.buildProjectWhere(scope);
 
     const projects = await this.prisma.project.findMany({
       where: scopeWhere,
@@ -715,7 +719,7 @@ export class ProjectsService {
       throw new NotFoundException(`Project with ID "${id}" not found`);
     }
 
-    this.assertProjectAccess(project, actor, actorOrg);
+    await this.assertProjectAccess(project, actor, actorOrg);
 
     const logs = await this.prisma.auditLog.findMany({
       where: {
@@ -759,7 +763,7 @@ export class ProjectsService {
       throw new NotFoundException(`Project with ID "${id}" not found`);
     }
 
-    this.assertProjectAccess(project, actor, actorOrg);
+    await this.assertProjectAccess(project, actor, actorOrg);
 
     const assignments = await this.prisma.projectAssignment.findMany({
       where: { projectId: id, isActive: true },
@@ -791,193 +795,28 @@ export class ProjectsService {
   // HELPER: BUILD MULTI-TENANT & GEOGRAPHICAL SCOPE FILTER
   // ============================================================================
 
-  private buildScopeFilter(
+  private async buildScopeFilter(
     actor: AuthenticatedUser,
-    actorOrg: any,
-  ): Prisma.ProjectWhereInput {
-    // 1. PIA User -> Strictly limited to their own organization (or assigned projects)
-    if (actor.accountType === AccountType.PIA_USER) {
-      return {
-        OR: [
-          { implementingAgencyOrgId: actor.organizationId },
-          { assignments: { some: { userId: actor.id, isActive: true } } },
-        ],
-      };
-    }
-
-    // 2. Super Admin -> Scope derived from Parent Organization Hierarchy
-    if (actor.role === UserRole.SUPER_ADMIN) {
-      if (actorOrg.type === OrganizationType.CENTRAL_MINISTRY) {
-        return {}; // National Scope
-      }
-      if (actorOrg.type === OrganizationType.STATE_AUTHORITY) {
-        return actorOrg.state ? { state: actorOrg.state } : {};
-      }
-      if (actorOrg.type === OrganizationType.DISTRICT_AUTHORITY) {
-        const conds: Prisma.ProjectWhereInput = {};
-        if (actorOrg.state) conds.state = actorOrg.state;
-        if (actorOrg.district) {
-          conds.districts = { array_contains: actorOrg.district };
-        }
-        return conds;
-      }
-      if (actorOrg.type === OrganizationType.PROJECT_IMPLEMENTING_AGENCY) {
-        return { implementingAgencyOrgId: actor.organizationId };
-      }
-    }
-
-    // 3. Central Officers -> National Scope
-    if (actor.role === UserRole.CENTRAL_OFFICER) {
-      return {};
-    }
-
-    // 4. State Officers -> Bound to State Authority State
-    if (actor.role === UserRole.STATE_OFFICER) {
-      return actorOrg.state ? { state: actorOrg.state } : {};
-    }
-
-    // 5. District Officers & Specialized Local Officers
-    if (
-      actor.role === UserRole.DISTRICT_OFFICER ||
-      actor.role === UserRole.LAND_ACQUISITION_OFFICER ||
-      actor.role === UserRole.SURVEY_OFFICER ||
-      actor.role === UserRole.REVENUE_OFFICER ||
-      actor.role === UserRole.VERIFICATION_OFFICER ||
-      actor.role === UserRole.FINANCE_OFFICER ||
-      actor.role === UserRole.R_AND_R_OFFICER
-    ) {
-      const orConditions: Prisma.ProjectWhereInput[] = [
-        { assignments: { some: { userId: actor.id, isActive: true } } },
-      ];
-
-      const geoScope: Prisma.ProjectWhereInput = {};
-      if (actorOrg.state) geoScope.state = actorOrg.state;
-      if (actorOrg.district) {
-        geoScope.districts = { array_contains: actorOrg.district };
-      }
-
-      if (actorOrg.state || actorOrg.district) {
-        orConditions.push(geoScope);
-      }
-
-      return { OR: orConditions };
-    }
-
-    // 6. Viewers -> Follow Parent Org Scope
-    if (actor.role === UserRole.VIEWER) {
-      if (actorOrg.state && actorOrg.district) {
-        return {
-          state: actorOrg.state,
-          districts: { array_contains: actorOrg.district },
-        };
-      }
-      if (actorOrg.state) {
-        return { state: actorOrg.state };
-      }
-      return { implementingAgencyOrgId: actor.organizationId };
-    }
-
-    return {};
+    actorOrg?: any,
+  ): Promise<Prisma.ProjectWhereInput> {
+    const scope = await this.jurisdictionService.resolveEffectiveScope(actor);
+    return this.jurisdictionService.buildProjectWhere(scope);
   }
 
   // ============================================================================
   // HELPER: ASSERT DIRECT PROJECT ACCESS (Security Guard)
   // ============================================================================
 
-  private assertProjectAccess(project: any, actor: AuthenticatedUser, actorOrg: any): void {
-    // PIA Isolation Check
-    if (actor.accountType === AccountType.PIA_USER) {
-      const isAssigned = project.assignments?.some(
-        (a: any) => a.userId === actor.id && a.isActive,
-      );
-      if (project.implementingAgencyOrgId !== actor.organizationId && !isAssigned) {
-        throw new ForbiddenException(
-          'Implementing Agency users cannot access projects outside their organization',
-        );
-      }
-      return;
-    }
-
-    // Super Admin Scope Check
-    if (actor.role === UserRole.SUPER_ADMIN) {
-      if (actorOrg.type === OrganizationType.CENTRAL_MINISTRY) {
-        return; // National Central Scope
-      }
-      if (actorOrg.type === OrganizationType.STATE_AUTHORITY) {
-        if (
-          actorOrg.state &&
-          project.state.toLowerCase() !== actorOrg.state.toLowerCase()
-        ) {
-          throw new ForbiddenException(
-            `State Super Admin can only access projects within ${actorOrg.state}`,
-          );
-        }
-        return;
-      }
-      if (actorOrg.type === OrganizationType.DISTRICT_AUTHORITY) {
-        if (
-          actorOrg.state &&
-          project.state.toLowerCase() !== actorOrg.state.toLowerCase()
-        ) {
-          throw new ForbiddenException(
-            `District Super Admin can only access projects within ${actorOrg.state}`,
-          );
-        }
-        if (actorOrg.district) {
-          const covered = (project.districts as string[]).some(
-            (d) => d.toLowerCase() === actorOrg.district!.toLowerCase(),
-          );
-          if (!covered) {
-            throw new ForbiddenException(
-              `District Super Admin can only access projects covering ${actorOrg.district}`,
-            );
-          }
-        }
-        return;
-      }
-    }
-
-    // Central Officer Check
-    if (actor.role === UserRole.CENTRAL_OFFICER) {
-      return;
-    }
-
-    // State Officer Check
-    if (actor.role === UserRole.STATE_OFFICER) {
-      if (
-        actorOrg.state &&
-        project.state.toLowerCase() !== actorOrg.state.toLowerCase()
-      ) {
-        throw new ForbiddenException(
-          `State Officers can only access projects within ${actorOrg.state}`,
-        );
-      }
-      return;
-    }
-
-    // Local / District Officers & Assignments Check
-    const isAssigned = project.assignments?.some(
-      (a: any) => a.userId === actor.id && a.isActive,
-    );
-    if (isAssigned) {
-      return;
-    }
-
-    if (actorOrg.state && project.state.toLowerCase() !== actorOrg.state.toLowerCase()) {
+  private async assertProjectAccess(
+    project: any,
+    actor: AuthenticatedUser,
+    actorOrg?: any,
+  ): Promise<void> {
+    const scope = await this.jurisdictionService.resolveEffectiveScope(actor);
+    if (!this.jurisdictionService.canAccessProject(scope, project)) {
       throw new ForbiddenException(
-        `Government officers cannot access projects outside their jurisdiction (${actorOrg.state})`,
+        'Forbidden: You do not have jurisdictional authority to access this project',
       );
-    }
-
-    if (actorOrg.district) {
-      const covered = (project.districts as string[]).some(
-        (d) => d.toLowerCase() === actorOrg.district!.toLowerCase(),
-      );
-      if (!covered) {
-        throw new ForbiddenException(
-          `District Officers cannot access projects outside their assigned district (${actorOrg.district})`,
-        );
-      }
     }
   }
 
