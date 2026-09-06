@@ -1,0 +1,1040 @@
+// ==============================================================================
+// NLAMS — National Land Acquisition & Management System
+// Comprehensive Domain Database Schema (PostgreSQL + PostGIS + Prisma)
+// ==============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis]
+}
+
+// ==============================================================================
+// 1. LOCKED SYSTEM ENUMS (Preserved from Steps 1–15)
+// ==============================================================================
+
+enum UserRole {
+  SUPER_ADMIN
+  CENTRAL_OFFICER
+  STATE_OFFICER
+  DISTRICT_OFFICER
+  PROJECT_IMPLEMENTING_AGENCY
+  LAND_ACQUISITION_OFFICER
+  SURVEY_OFFICER
+  REVENUE_OFFICER
+  VERIFICATION_OFFICER
+  FINANCE_OFFICER
+  R_AND_R_OFFICER
+  VIEWER
+}
+
+enum AccountType {
+  GOVERNMENT_OFFICER
+  PIA_USER
+}
+
+enum OrganizationType {
+  CENTRAL_MINISTRY
+  STATE_AUTHORITY
+  DISTRICT_AUTHORITY
+  PROJECT_IMPLEMENTING_AGENCY
+}
+
+enum OrganizationStatus {
+  PENDING_APPROVAL
+  ACTIVE
+  REJECTED
+  SUSPENDED
+}
+
+enum ProjectStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_SCRUTINY
+  DOCUMENT_VERIFICATION
+  DISTRICT_APPROVAL
+  STATE_APPROVAL
+  CENTRAL_APPROVAL
+  NOTIFICATION_ISSUED
+  AWARD_DECLARED
+  COMPENSATION_ASSESSED
+  COMPENSATION_DISBURSED
+  POSSESSION_PENDING
+  POSSESSION_COMPLETED
+  R_AND_R_IN_PROGRESS
+  COMPLETED
+  REJECTED
+  ON_HOLD
+}
+
+enum ProjectCategory {
+  HIGHWAY
+  RAILWAY
+  IRRIGATION
+  INDUSTRIAL_CORRIDOR
+  URBAN_INFRASTRUCTURE
+  ENERGY
+  DEFENCE
+}
+
+enum ParcelStatus {
+  IDENTIFIED
+  VERIFICATION_PENDING
+  VERIFIED
+  DISPUTED
+  UNDER_ACQUISITION
+  AWARD_DECLARED
+  COMPENSATION_PENDING
+  COMPENSATION_PAID
+  POSSESSION_PENDING
+  POSSESSION_TAKEN
+}
+
+enum LandType {
+  AGRICULTURAL
+  HOMESTEAD
+  FOREST
+  COMMERCIAL
+  GOVERNMENT_WASTE
+}
+
+enum OwnershipVerificationStatus {
+  VERIFIED
+  PENDING
+  DISPUTED
+}
+
+enum DocumentCategory {
+  GAZETTE_NOTIFICATION
+  SURVEY_RECORD
+  TITLE_DOCUMENT
+  AWARD_DOCUMENT
+  COMPENSATION_DOCUMENT
+  POSSESSION_DOCUMENT
+  OBJECTION_FILING
+  R_AND_R_DOCUMENT
+  COURT_ORDER
+  PROJECT_PROPOSAL
+  OTHER
+}
+
+enum DocumentVerificationStatus {
+  PENDING
+  UNDER_REVIEW
+  VERIFIED
+  REJECTED
+  SUPERSEDED
+}
+
+enum WorkflowTaskStatus {
+  PENDING
+  IN_REVIEW
+  COMPLETED
+  REJECTED
+  ON_HOLD
+}
+
+enum WorkflowPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum WorkflowSlaStatus {
+  ON_TRACK
+  DUE_SOON
+  OVERDUE
+  COMPLETED
+}
+
+enum CompensationAssessmentStatus {
+  ASSESSMENT_PENDING
+  UNDER_ASSESSMENT
+  ASSESSMENT_COMPLETED
+  AWARD_PENDING
+  AWARD_DECLARED
+  PAYMENT_APPROVAL_PENDING
+  PAYMENT_APPROVED
+  DISBURSEMENT_PENDING
+  PARTIALLY_DISBURSED
+  DISBURSED
+  ON_HOLD
+  DISPUTED
+}
+
+enum CompensationPaymentStatus {
+  PENDING
+  APPROVED
+  PROCESSING
+  PARTIALLY_DISBURSED
+  DISBURSED
+  FAILED
+  ON_HOLD
+  DISPUTED
+}
+
+enum PossessionStatus {
+  READY_FOR_POSSESSION
+  NOTICE_PREPARED
+  NOTICE_ISSUED
+  SCHEDULED
+  SITE_VERIFICATION
+  POSSESSION_PENDING
+  POSSESSION_TAKEN
+  CERTIFICATE_PENDING
+  CERTIFICATE_ISSUED
+  ON_HOLD
+  DISPUTED
+}
+
+enum PossessionType {
+  VOLUNTARY
+  STATUTORY
+  PARTIAL
+  FULL
+}
+
+enum SiteVerificationResult {
+  VERIFIED
+  REQUIRES_REVIEW
+  BLOCKED
+}
+
+enum RAndRStatus {
+  IDENTIFIED
+  ASSESSMENT_PENDING
+  ELIGIBILITY_REVIEW
+  ENTITLEMENT_DEFINED
+  PLAN_PREPARED
+  APPROVAL_PENDING
+  BENEFIT_APPROVED
+  BENEFIT_IN_PROGRESS
+  RELOCATION_IN_PROGRESS
+  POST_RELOCATION_VERIFICATION
+  COMPLETED
+  ON_HOLD
+  DISPUTED
+}
+
+enum RAndREligibilityStatus {
+  PENDING
+  UNDER_REVIEW
+  ELIGIBLE
+  NOT_ELIGIBLE
+  REQUIRES_DOCUMENTATION
+  DISPUTED
+}
+
+enum RAndRBenefitType {
+  HOUSING_ASSISTANCE
+  RESETTLEMENT_SITE
+  LIVELIHOOD_ASSISTANCE
+  TRANSPORT_ASSISTANCE
+  TEMPORARY_ACCOMMODATION
+  EMPLOYMENT_ASSISTANCE
+  TRAINING_ASSISTANCE
+  OTHER_ASSISTANCE
+}
+
+enum RAndRBenefitStatus {
+  NOT_STARTED
+  PLANNED
+  APPROVAL_PENDING
+  APPROVED
+  IN_PROGRESS
+  DELIVERED
+  VERIFIED
+  ON_HOLD
+  DISPUTED
+}
+
+enum RelocationStatus {
+  NOT_STARTED
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  NOT_REQUIRED
+}
+
+enum NotificationType {
+  SYSTEM
+  WORKFLOW_ASSIGNED
+  SLA_WARNING
+  SLA_BREACH
+  STATUS_CHANGE
+  DISBURSEMENT_RECORDED
+  POSSESSION_HANDOVER
+  DOCUMENT_VERIFICATION
+}
+
+// ==============================================================================
+// 2. ORGANIZATIONS & USERS DOMAIN
+// ==============================================================================
+
+model Organization {
+  id           String             @id @default(uuid())
+  code         String?            @unique
+  name         String
+  type         OrganizationType
+  status       OrganizationStatus @default(ACTIVE)
+  state        String?
+  district     String?
+  jurisdiction Json? // Administrative boundary coordinates / metadata
+  parentId     String?
+  parent       Organization?      @relation("OrgHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children     Organization[]     @relation("OrgHierarchy")
+  isActive     Boolean            @default(true)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  users         User[]
+  projects      Project[]      @relation("ImplementingAgencyProjects")
+  workflowTasks WorkflowTask[] @relation("AssignedOrgTasks")
+
+  @@index([type])
+  @@index([status])
+  @@index([state, district])
+  @@map("organizations")
+}
+
+model User {
+  id             String       @id @default(uuid())
+  email          String       @unique
+  passwordHash   String
+  fullName       String
+  phone          String?
+  accountType    AccountType  @default(GOVERNMENT_OFFICER)
+  role           UserRole
+  designation    String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  avatarUrl      String?
+  isActive       Boolean      @default(true)
+  lastLoginAt    DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  assignedTasks              WorkflowTask[]                   @relation("AssignedOfficerTasks")
+  createdHistoryEvents       WorkflowHistory[]                @relation("PerformedByHistory")
+  taskComments               WorkflowComment[]                @relation("AuthorComments")
+  uploadedDocuments          Document[]                       @relation("UploadedDocuments")
+  verifiedDocuments          Document[]                       @relation("VerifiedDocuments")
+  uploadedDocVersions        DocumentVersion[]                @relation("UploadedDocVersions")
+  docActivities              DocumentActivity[]               @relation("ActorDocActivities")
+  assessedCompensations      CompensationAssessment[]         @relation("AssessingOfficerCompensations")
+  recordedTransactions       CompensationPaymentTransaction[] @relation("RecordedByTransactions")
+  possessionRecords          PossessionRecord[]               @relation("AssignedOfficerPossessions")
+  possessionTimeline         PossessionTimelineEvent[]        @relation("ActorPossessionTimeline")
+  possessionRemarks          PossessionRemark[]               @relation("AuthorPossessionRemarks")
+  rAndRBenefits              RAndRBenefit[]                   @relation("ResponsibleOfficerBenefits")
+  notifications              Notification[]                   @relation("RecipientNotifications")
+  auditLogs                  AuditLog[]                       @relation("ActorAuditLogs")
+  authSessions               AuthSession[]
+  projectAssignments         ProjectAssignment[]
+  assignedProjectAssignments ProjectAssignment[]              @relation("AssignedByOfficers")
+
+  @@index([role])
+  @@index([accountType])
+  @@index([organizationId])
+  @@index([isActive])
+  @@map("users")
+}
+
+model AuthSession {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String
+  ipAddress String?
+  userAgent String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("auth_sessions")
+}
+
+model ProjectAssignment {
+  id           String   @id @default(uuid())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role         UserRole
+  assignedAt   DateTime @default(now())
+  assignedById String?
+  assignedBy   User?    @relation("AssignedByOfficers", fields: [assignedById], references: [id], onDelete: SetNull)
+  isActive     Boolean  @default(true)
+
+  @@unique([projectId, userId])
+  @@index([projectId])
+  @@index([userId])
+  @@index([isActive])
+  @@map("project_assignments")
+}
+
+// ==============================================================================
+// 3. PROJECT DOMAIN
+// ==============================================================================
+
+model Project {
+  id                       String          @id @default(uuid())
+  code                     String          @unique
+  title                    String
+  description              String?         @db.Text
+  category                 ProjectCategory @default(HIGHWAY)
+  status                   ProjectStatus   @default(DRAFT)
+  implementingAgencyOrgId  String
+  implementingAgencyOrg    Organization    @relation("ImplementingAgencyProjects", fields: [implementingAgencyOrgId], references: [id], onDelete: Restrict)
+  state                    String
+  districts                Json // Array of district names: string[]
+  totalAreaHectares        Decimal         @default(0.0) @db.Decimal(12, 4)
+  estimatedCompensationInr Decimal         @default(0.0) @db.Decimal(18, 2)
+  disbursedCompensationInr Decimal         @default(0.0) @db.Decimal(18, 2)
+  spatialBounds            Json? // GeoJSON MultiPolygon/Polygon/LineString corridor boundary
+  notifiedOn               DateTime?
+  targetCompletionOn       DateTime?
+  metadata                 Json?
+  isActive                 Boolean         @default(true)
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
+
+  parcels                 Parcel[]
+  documents               Document[]
+  workflowTasks           WorkflowTask[]
+  compensationAssessments CompensationAssessment[]
+  possessionRecords       PossessionRecord[]
+  randrCases              RAndRCase[]
+  affectedHouseholds      AffectedHousehold[]
+  assignments             ProjectAssignment[]
+
+  @@index([status])
+  @@index([state])
+  @@index([implementingAgencyOrgId])
+  @@index([category])
+  @@map("projects")
+}
+
+// ==============================================================================
+// 4. CADASTRAL PARCEL DOMAIN
+// ==============================================================================
+
+model Parcel {
+  id                      String       @id @default(uuid())
+  surveyNumber            String
+  khasraNumber            String?
+  projectId               String
+  project                 Project      @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  village                 String
+  tehsil                  String?
+  district                String
+  state                   String
+  landType                LandType     @default(AGRICULTURAL)
+  areaHectares            Decimal      @db.Decimal(12, 4)
+  status                  ParcelStatus @default(IDENTIFIED)
+  marketRateInrPerHectare Decimal      @default(0.0) @db.Decimal(14, 2)
+  compensationInr         Decimal      @default(0.0) @db.Decimal(18, 2)
+  centroidLat             Decimal?     @db.Decimal(10, 7)
+  centroidLng             Decimal?     @db.Decimal(10, 7)
+  spatialGeometry         Json? // Cadastral plot GeoJSON Polygon / MultiPolygon
+  gisPolygonReference     String?
+  metadata                Json?
+  isActive                Boolean      @default(true)
+  createdAt               DateTime     @default(now())
+  updatedAt               DateTime     @updatedAt
+
+  parcelLandowners        ParcelLandowner[]
+  documents               Document[]
+  compensationAssessments CompensationAssessment[]
+  landownerCompensations  LandownerCompensation[]
+  possessionRecords       PossessionRecord[]
+  affectedHouseholds      AffectedHousehold[]
+
+  @@unique([projectId, surveyNumber])
+  @@index([projectId])
+  @@index([status])
+  @@index([state, district, village])
+  @@index([landType])
+  @@map("parcels")
+}
+
+// ==============================================================================
+// 5. LANDOWNERS & OWNERSHIP DOMAIN (Normalized Explicit Join)
+// ==============================================================================
+
+model Landowner {
+  id                 String   @id @default(uuid())
+  fullName           String
+  fatherOrSpouseName String?
+  aadhaarLast4       String? // Masked government identifier (non-sensitive last 4 digits only)
+  village            String?
+  contactPhone       String?
+  bankAccountLinked  Boolean  @default(false)
+  isVerified         Boolean  @default(false)
+  metadata           Json?
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  parcelLandowners ParcelLandowner[]
+  compensations    LandownerCompensation[]
+  transactions     CompensationPaymentTransaction[]
+
+  @@index([fullName])
+  @@index([village])
+  @@map("landowners")
+}
+
+model ParcelLandowner {
+  id                   String                      @id @default(uuid())
+  parcelId             String
+  parcel               Parcel                      @relation(fields: [parcelId], references: [id], onDelete: Restrict)
+  landownerId          String
+  landowner            Landowner                   @relation(fields: [landownerId], references: [id], onDelete: Restrict)
+  ownershipPercentage  Decimal                     @db.Decimal(5, 2) // e.g. 50.00%
+  eligibleAreaHectares Decimal                     @db.Decimal(12, 4)
+  ownershipType        String?                     @default("SOLE_OR_JOINT")
+  verificationStatus   OwnershipVerificationStatus @default(PENDING)
+  remarks              String?
+  createdAt            DateTime                    @default(now())
+  updatedAt            DateTime                    @updatedAt
+
+  @@unique([parcelId, landownerId])
+  @@index([parcelId])
+  @@index([landownerId])
+  @@index([verificationStatus])
+  @@map("parcel_landowners")
+}
+
+// ==============================================================================
+// 6. DOCUMENT MANAGEMENT DOMAIN
+// ==============================================================================
+
+model Document {
+  id                 String                     @id @default(uuid())
+  documentNumber     String?                    @unique
+  title              String
+  category           DocumentCategory
+  projectId          String
+  project            Project                    @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  parcelId           String?
+  parcel             Parcel?                    @relation(fields: [parcelId], references: [id], onDelete: SetNull)
+  fileName           String
+  fileType           String // PDF, GEOJSON, XLSX, DWG, IMAGE, DOCX
+  fileSizeKb         Int
+  mimeType           String?
+  storageProvider    String                     @default("MINIO_S3")
+  storageBucket      String                     @default("nlams-documents")
+  storageKey         String // Object storage path / reference key
+  checksumSha256     String?
+  currentVersion     Int                        @default(1)
+  isConfidential     Boolean                    @default(false)
+  isInternalOnly     Boolean                    @default(false)
+  verificationStatus DocumentVerificationStatus @default(PENDING)
+  uploadedById       String
+  uploadedBy         User                       @relation("UploadedDocuments", fields: [uploadedById], references: [id], onDelete: Restrict)
+  verifiedById       String?
+  verifiedBy         User?                      @relation("VerifiedDocuments", fields: [verifiedById], references: [id], onDelete: SetNull)
+  verifiedAt         DateTime?
+  remarks            String?
+  metadata           Json?
+  isActive           Boolean                    @default(true)
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+
+  versions          DocumentVersion[]
+  activities        DocumentActivity[]
+  possessionNotices PossessionRecord[] @relation("PossessionNoticeDocuments")
+  possessionCerts   PossessionRecord[] @relation("PossessionCertificateDocuments")
+
+  @@index([projectId])
+  @@index([parcelId])
+  @@index([category])
+  @@index([verificationStatus])
+  @@map("documents")
+}
+
+model DocumentVersion {
+  id                 String                     @id @default(uuid())
+  documentId         String
+  document           Document                   @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  versionNumber      Int
+  fileName           String
+  fileSizeKb         Int
+  mimeType           String?
+  storageKey         String
+  checksumSha256     String?
+  uploadedById       String
+  uploadedBy         User                       @relation("UploadedDocVersions", fields: [uploadedById], references: [id], onDelete: Restrict)
+  verificationStatus DocumentVerificationStatus @default(PENDING)
+  remarks            String?
+  createdAt          DateTime                   @default(now())
+
+  @@unique([documentId, versionNumber])
+  @@index([documentId])
+  @@map("document_versions")
+}
+
+model DocumentActivity {
+  id         String   @id @default(uuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  action     String // UPLOAD, VERSION_UPDATE, VERIFY, REJECT, SUPERSEDE
+  actorId    String
+  actor      User     @relation("ActorDocActivities", fields: [actorId], references: [id], onDelete: Restrict)
+  remarks    String?
+  createdAt  DateTime @default(now())
+
+  @@index([documentId])
+  @@map("document_activities")
+}
+
+// ==============================================================================
+// 7. WORKFLOW & SLA DOMAIN
+// ==============================================================================
+
+model WorkflowTask {
+  id                String             @id @default(uuid())
+  projectId         String
+  project           Project            @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  currentStage      ProjectStatus
+  targetStage       ProjectStatus?
+  taskType          String // SCRUTINY, VERIFICATION, DISTRICT_APPROVAL, etc.
+  title             String
+  description       String?            @db.Text
+  assignedRoleId    UserRole
+  assignedOfficerId String
+  assignedOfficer   User               @relation("AssignedOfficerTasks", fields: [assignedOfficerId], references: [id], onDelete: Restrict)
+  assignedOrgId     String
+  assignedOrg       Organization       @relation("AssignedOrgTasks", fields: [assignedOrgId], references: [id], onDelete: Restrict)
+  status            WorkflowTaskStatus @default(PENDING)
+  priority          WorkflowPriority   @default(MEDIUM)
+  slaDays           Int                @default(7)
+  slaStatus         WorkflowSlaStatus  @default(ON_TRACK)
+  dueAt             DateTime
+  completedAt       DateTime?
+  availableActions  Json? // Array of action types: string[] (APPROVE, REJECT, HOLD, etc.)
+  remarks           String?
+  metadata          Json?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  history  WorkflowHistory[]
+  comments WorkflowComment[]
+
+  @@index([projectId])
+  @@index([status])
+  @@index([assignedOfficerId])
+  @@index([assignedRoleId])
+  @@index([dueAt])
+  @@index([slaStatus])
+  @@map("workflow_tasks")
+}
+
+model WorkflowHistory {
+  id            String       @id @default(uuid())
+  taskId        String
+  task          WorkflowTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  action        String // APPROVE, REJECT, HOLD, REASSIGN, COMMENT
+  fromStatus    String?
+  toStatus      String?
+  performedById String
+  performedBy   User         @relation("PerformedByHistory", fields: [performedById], references: [id], onDelete: Restrict)
+  remarks       String?
+  createdAt     DateTime     @default(now())
+
+  @@index([taskId])
+  @@index([performedById])
+  @@map("workflow_history")
+}
+
+model WorkflowComment {
+  id             String       @id @default(uuid())
+  taskId         String
+  task           WorkflowTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  authorId       String
+  author         User         @relation("AuthorComments", fields: [authorId], references: [id], onDelete: Restrict)
+  comment        String       @db.Text
+  isInternalOnly Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+
+  @@index([taskId])
+  @@map("workflow_comments")
+}
+
+// ==============================================================================
+// 8. COMPENSATION LEDGER DOMAIN
+// ==============================================================================
+
+model CompensationAssessment {
+  id                        String                       @id @default(uuid())
+  assessmentNumber          String                       @unique
+  projectId                 String
+  project                   Project                      @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  parcelId                  String
+  parcel                    Parcel                       @relation(fields: [parcelId], references: [id], onDelete: Restrict)
+  awardId                   String?
+  awardDate                 DateTime?
+  awardAuthority            String?
+  assessmentStatus          CompensationAssessmentStatus @default(ASSESSMENT_PENDING)
+  paymentStatus             CompensationPaymentStatus    @default(PENDING)
+  landAreaHectares          Decimal                      @db.Decimal(12, 4)
+  landClassification        String
+  totalMarketValueInr       Decimal                      @default(0.0) @db.Decimal(18, 2)
+  solatiumAmountInr         Decimal                      @default(0.0) @db.Decimal(18, 2) // 100% solatium (Sec 30(1))
+  additionalCompensationInr Decimal                      @default(0.0) @db.Decimal(18, 2) // 12% statutory interest (Sec 30(3))
+  statutoryBenefitsInr      Decimal                      @default(0.0) @db.Decimal(18, 2) // Structures, crops, trees
+  deductionsInr             Decimal                      @default(0.0) @db.Decimal(18, 2)
+  totalAssessedAmountInr    Decimal                      @default(0.0) @db.Decimal(18, 2) // Gross Assessed
+  totalPayableAmountInr     Decimal                      @default(0.0) @db.Decimal(18, 2) // Net Payable
+  amountDisbursedInr        Decimal                      @default(0.0) @db.Decimal(18, 2)
+  amountPendingInr          Decimal                      @default(0.0) @db.Decimal(18, 2)
+  assessmentDate            DateTime?
+  awardDeclaredDate         DateTime?
+  approvedDate              DateTime?
+  assessingOfficerId        String?
+  assessingOfficer          User?                        @relation("AssessingOfficerCompensations", fields: [assessingOfficerId], references: [id], onDelete: SetNull)
+  remarks                   String?
+  metadata                  Json?
+  createdAt                 DateTime                     @default(now())
+  updatedAt                 DateTime                     @updatedAt
+
+  entitlements LandownerCompensation[]
+  transactions CompensationPaymentTransaction[]
+
+  @@index([projectId])
+  @@index([parcelId])
+  @@index([assessmentStatus])
+  @@index([paymentStatus])
+  @@map("compensation_assessments")
+}
+
+model LandownerCompensation {
+  id                    String                    @id @default(uuid())
+  assessmentId          String
+  assessment            CompensationAssessment    @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+  parcelId              String
+  parcel                Parcel                    @relation(fields: [parcelId], references: [id], onDelete: Restrict)
+  landownerId           String
+  landowner             Landowner                 @relation(fields: [landownerId], references: [id], onDelete: Restrict)
+  ownershipShare        Decimal                   @db.Decimal(5, 4) // e.g. 0.5000 (50%)
+  eligibleAreaHectares  Decimal                   @db.Decimal(12, 4)
+  marketValueShareInr   Decimal                   @default(0.0) @db.Decimal(18, 2)
+  solatiumShareInr      Decimal                   @default(0.0) @db.Decimal(18, 2)
+  additionalBenefitsInr Decimal                   @default(0.0) @db.Decimal(18, 2)
+  deductionsInr         Decimal                   @default(0.0) @db.Decimal(18, 2)
+  payableAmountInr      Decimal                   @default(0.0) @db.Decimal(18, 2)
+  disbursedAmountInr    Decimal                   @default(0.0) @db.Decimal(18, 2)
+  pendingAmountInr      Decimal                   @default(0.0) @db.Decimal(18, 2)
+  paymentStatus         CompensationPaymentStatus @default(PENDING)
+  bankReferenceMasked   String? // e.g. "SBI A/C •••• 4821 (PFMS Mapped)"
+  remarks               String?
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+
+  transactions CompensationPaymentTransaction[]
+
+  @@unique([assessmentId, landownerId])
+  @@index([assessmentId])
+  @@index([parcelId])
+  @@index([landownerId])
+  @@index([paymentStatus])
+  @@map("landowner_compensations")
+}
+
+model CompensationPaymentTransaction {
+  id                   String                    @id @default(uuid())
+  assessmentId         String
+  assessment           CompensationAssessment    @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+  entitlementId        String?
+  entitlement          LandownerCompensation?    @relation(fields: [entitlementId], references: [id], onDelete: SetNull)
+  landownerId          String?
+  landowner            Landowner?                @relation(fields: [landownerId], references: [id], onDelete: SetNull)
+  transactionReference String                    @unique
+  amountInr            Decimal                   @db.Decimal(18, 2)
+  paymentStatus        CompensationPaymentStatus @default(DISBURSED)
+  paymentMethod        String                    @default("PFMS_DBT") // PFMS_DBT, TREASURY_CHEQUE, SECTION_77_ESCROW
+  recordedById         String
+  recordedBy           User                      @relation("RecordedByTransactions", fields: [recordedById], references: [id], onDelete: Restrict)
+  remarks              String?
+  transactedAt         DateTime                  @default(now())
+  createdAt            DateTime                  @default(now())
+
+  @@index([assessmentId])
+  @@index([entitlementId])
+  @@index([landownerId])
+  @@index([paymentStatus])
+  @@map("compensation_payment_transactions")
+}
+
+// ==============================================================================
+// 9. POSSESSION & SECTION 38 DOMAIN
+// ==============================================================================
+
+model PossessionRecord {
+  id                       String                  @id @default(uuid())
+  projectId                String
+  project                  Project                 @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  parcelId                 String
+  parcel                   Parcel                  @relation(fields: [parcelId], references: [id], onDelete: Restrict)
+  possessionStatus         PossessionStatus        @default(POSSESSION_PENDING)
+  possessionType           PossessionType          @default(STATUTORY)
+  slaStatus                WorkflowSlaStatus       @default(ON_TRACK)
+  landAreaHectares         Decimal                 @db.Decimal(12, 4)
+  landClassification       String
+  assignedOfficerId        String
+  assignedOfficer          User                    @relation("AssignedOfficerPossessions", fields: [assignedOfficerId], references: [id], onDelete: Restrict)
+  scheduledDate            DateTime?
+  noticeDate               DateTime?
+  noticeReference          String?
+  noticeDocumentId         String?
+  noticeDocument           Document?               @relation("PossessionNoticeDocuments", fields: [noticeDocumentId], references: [id], onDelete: SetNull)
+  siteVerificationDate     DateTime?
+  siteVerificationOfficer  String?
+  siteVerificationResult   SiteVerificationResult?
+  siteObservations         String?                 @db.Text
+  possessionDate           DateTime?
+  certificateId            String?
+  certificateDocumentId    String?
+  certificateDocument      Document?               @relation("PossessionCertificateDocuments", fields: [certificateDocumentId], references: [id], onDelete: SetNull)
+  certificateDate          DateTime?
+  compensationStatus       String                  @default("PENDING")
+  totalCompensationInr     Decimal                 @default(0.0) @db.Decimal(18, 2)
+  disbursedCompensationInr Decimal                 @default(0.0) @db.Decimal(18, 2)
+  pendingCompensationInr   Decimal                 @default(0.0) @db.Decimal(18, 2)
+  readinessStatus          String                  @default("READY") // READY, CONDITIONAL, BLOCKED
+  holdReason               String?
+  disputeReason            String?
+  remarks                  String?
+  metadata                 Json?
+  createdAt                DateTime                @default(now())
+  updatedAt                DateTime                @updatedAt
+
+  checklistItems PossessionChecklistItem[]
+  timeline       PossessionTimelineEvent[]
+  remarksList    PossessionRemark[]
+
+  @@unique([projectId, parcelId])
+  @@index([projectId])
+  @@index([parcelId])
+  @@index([possessionStatus])
+  @@index([assignedOfficerId])
+  @@map("possession_records")
+}
+
+model PossessionChecklistItem {
+  id               String           @id @default(uuid())
+  possessionId     String
+  possessionRecord PossessionRecord @relation(fields: [possessionId], references: [id], onDelete: Cascade)
+  label            String
+  status           String           @default("PENDING") // MET, PENDING, BLOCKED
+  supportingRef    String?
+  isBlocking       Boolean          @default(false)
+  notes            String?
+  createdAt        DateTime         @default(now())
+
+  @@index([possessionId])
+  @@map("possession_checklist_items")
+}
+
+model PossessionTimelineEvent {
+  id               String           @id @default(uuid())
+  possessionId     String
+  possessionRecord PossessionRecord @relation(fields: [possessionId], references: [id], onDelete: Cascade)
+  actorId          String
+  actor            User             @relation("ActorPossessionTimeline", fields: [actorId], references: [id], onDelete: Restrict)
+  action           String
+  remarks          String?
+  timestamp        DateTime         @default(now())
+
+  @@index([possessionId])
+  @@map("possession_timeline_events")
+}
+
+model PossessionRemark {
+  id               String           @id @default(uuid())
+  possessionId     String
+  possessionRecord PossessionRecord @relation(fields: [possessionId], references: [id], onDelete: Cascade)
+  authorId         String
+  author           User             @relation("AuthorPossessionRemarks", fields: [authorId], references: [id], onDelete: Restrict)
+  remark           String           @db.Text
+  createdAt        DateTime         @default(now())
+
+  @@index([possessionId])
+  @@map("possession_remarks")
+}
+
+// ==============================================================================
+// 10. REHABILITATION & RESETTLEMENT (R&R) DOMAIN
+// ==============================================================================
+
+model RAndRCase {
+  id                        String                 @id @default(uuid())
+  caseNumber                String                 @unique
+  projectId                 String
+  project                   Project                @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  status                    RAndRStatus            @default(IDENTIFIED)
+  eligibilityStatus         RAndREligibilityStatus @default(PENDING)
+  totalAffectedFamilies     Int                    @default(0)
+  totalEligibleFamilies     Int                    @default(0)
+  benefitsApprovedInr       Decimal                @default(0.0) @db.Decimal(18, 2)
+  benefitsDeliveredInr      Decimal                @default(0.0) @db.Decimal(18, 2)
+  relocationStatus          RelocationStatus       @default(NOT_STARTED)
+  rAndRCompletionPercentage Decimal                @default(0.0) @db.Decimal(5, 2)
+  remarks                   String?
+  metadata                  Json?
+  createdAt                 DateTime               @default(now())
+  updatedAt                 DateTime               @updatedAt
+
+  affectedHouseholds AffectedHousehold[]
+  entitlements       RAndREntitlement[]
+  benefits           RAndRBenefit[]
+
+  @@index([projectId])
+  @@index([status])
+  @@index([eligibilityStatus])
+  @@map("randr_cases")
+}
+
+model AffectedHousehold {
+  id                    String     @id @default(uuid())
+  householdReference    String     @unique
+  rAndRCaseId           String?
+  rAndRCase             RAndRCase? @relation(fields: [rAndRCaseId], references: [id], onDelete: SetNull)
+  projectId             String
+  project               Project    @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  parcelId              String
+  parcel                Parcel     @relation(fields: [parcelId], references: [id], onDelete: Restrict)
+  headOfHouseholdName   String?
+  village               String
+  tehsil                String?
+  district              String
+  familySize            Int        @default(1)
+  affectedMembers       Int        @default(1)
+  vulnerableMemberCount Int        @default(0)
+  livelihoodType        String? // AGRICULTURE, ARTISAN, LABOUR, COMMERCIAL
+  relocationRequired    Boolean    @default(false)
+  documentationStatus   String     @default("PENDING") // COMPLETE, PENDING, DISCREPANCY
+  metadata              Json?
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+
+  @@index([rAndRCaseId])
+  @@index([projectId])
+  @@index([parcelId])
+  @@map("affected_households")
+}
+
+model RAndREntitlement {
+  id                String           @id @default(uuid())
+  rAndRCaseId       String
+  rAndRCase         RAndRCase        @relation(fields: [rAndRCaseId], references: [id], onDelete: Cascade)
+  entitlementType   RAndRBenefitType
+  description       String
+  quantityValue     String?
+  status            String           @default("DEFINED") // DEFINED, APPROVED, IN_DELIVERY, DELIVERED
+  approvalReference String?
+  approvedDate      DateTime?
+  deliveredDate     DateTime?
+  remarks           String?
+  createdAt         DateTime         @default(now())
+
+  @@index([rAndRCaseId])
+  @@map("randr_entitlements")
+}
+
+model RAndRBenefit {
+  id                   String             @id @default(uuid())
+  rAndRCaseId          String
+  rAndRCase            RAndRCase          @relation(fields: [rAndRCaseId], references: [id], onDelete: Cascade)
+  benefitType          RAndRBenefitType
+  status               RAndRBenefitStatus @default(PLANNED)
+  plannedValueInr      Decimal            @default(0.0) @db.Decimal(18, 2)
+  approvedValueInr     Decimal            @default(0.0) @db.Decimal(18, 2)
+  deliveredValueInr    Decimal            @default(0.0) @db.Decimal(18, 2)
+  deliveryDate         DateTime?
+  verificationDate     DateTime?
+  responsibleOfficerId String?
+  responsibleOfficer   User?              @relation("ResponsibleOfficerBenefits", fields: [responsibleOfficerId], references: [id], onDelete: SetNull)
+  remarks              String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@index([rAndRCaseId])
+  @@index([status])
+  @@map("randr_benefits")
+}
+
+// ==============================================================================
+// 11. NOTIFICATIONS DOMAIN
+// ==============================================================================
+
+model Notification {
+  id          String           @id @default(uuid())
+  recipientId String
+  recipient   User             @relation("RecipientNotifications", fields: [recipientId], references: [id], onDelete: Cascade)
+  type        NotificationType @default(SYSTEM)
+  title       String
+  message     String           @db.Text
+  isRead      Boolean          @default(false)
+  readAt      DateTime?
+  entityType  String? // PROJECT, PARCEL, WORKFLOW, COMPENSATION, POSSESSION
+  entityId    String?
+  linkUrl     String?
+  metadata    Json?
+  createdAt   DateTime         @default(now())
+
+  @@index([recipientId])
+  @@index([isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+// ==============================================================================
+// 12. AUDIT ENGINE DOMAIN
+// ==============================================================================
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  actorId        String?
+  actor          User?    @relation("ActorAuditLogs", fields: [actorId], references: [id], onDelete: SetNull)
+  organizationId String?
+  action         String // CREATE, UPDATE, STATUS_TRANSITION, APPROVE, REJECT, DISBURSE, HANDOVER
+  entityType     String // Project, Parcel, WorkflowTask, CompensationAssessment, PossessionRecord, RAndRCase
+  entityId       String
+  previousState  Json? // Semi-structured snapshot before state transition
+  newState       Json? // Semi-structured snapshot after state transition
+  ipAddress      String?
+  userAgent      String?
+  correlationId  String?
+  createdAt      DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([organizationId])
+  @@index([createdAt])
+  @@index([correlationId])
+  @@map("audit_logs")
+}
+
+// ==============================================================================
+// 13. SYSTEM HEALTH & TELEMETRY
+// ==============================================================================
+
+model SystemHealth {
+  id        String   @id @default(uuid())
+  nodeName  String   @default("nlams-core-api")
+  status    String   @default("HEALTHY")
+  checkedAt DateTime @default(now())
+
+  @@map("system_health")
+}
