@@ -101,7 +101,10 @@ export class JurisdictionService {
           return {
             ...baseScope,
             level: 'CENTRAL',
+            jurisdictionLevel: 'CENTRAL',
             isCentral: true,
+            administrativeArea: null,
+            districts: [],
             adminJurisdictionLevel: AdminJurisdictionLevel.CENTRAL,
           };
         }
@@ -115,12 +118,19 @@ export class JurisdictionService {
           return {
             ...baseScope,
             level: 'STATE_AREA',
+            jurisdictionLevel: 'STATE_AREA',
             isStateArea: true,
             state: area.state,
             districts: districtNames,
             administrativeAreaId: area.id,
             administrativeAreaCode: area.code,
             administrativeAreaName: area.name,
+            administrativeArea: {
+              id: area.id,
+              code: area.code,
+              name: area.name,
+              state: area.state,
+            },
             adminJurisdictionLevel: AdminJurisdictionLevel.STATE_AREA,
           };
         }

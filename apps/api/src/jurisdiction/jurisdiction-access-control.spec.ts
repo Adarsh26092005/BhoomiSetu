@@ -55,14 +55,45 @@ describe('Jurisdiction-Aware Data Isolation & Access Control (Comprehensive Suit
     code: 'MH-02',
     name: 'Konkan / MMR Zone',
     state: 'Maharashtra',
-    description: 'Covers Thane, Mumbai, Palghar',
+    description: 'Covers Thane, Palghar',
     active: true,
     createdAt: new Date(),
     updatedAt: new Date(),
     districts: [
       { id: 'ad-4', administrativeAreaId: 'area-mh-02', district: 'Thane' },
-      { id: 'ad-5', administrativeAreaId: 'area-mh-02', district: 'Mumbai' },
       { id: 'ad-6', administrativeAreaId: 'area-mh-02', district: 'Palghar' },
+    ],
+  };
+
+  const mockAreaKA01 = {
+    id: 'area-ka-01',
+    code: 'KA-AREA-01',
+    name: 'Karnataka Area',
+    state: 'Karnataka',
+    description: 'Covers Bengaluru, Mysuru, Hampi',
+    active: true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    districts: [
+      { id: 'ad-ka-1', administrativeAreaId: 'area-ka-01', district: 'Bengaluru' },
+      { id: 'ad-ka-2', administrativeAreaId: 'area-ka-01', district: 'Mysuru' },
+      { id: 'ad-ka-3', administrativeAreaId: 'area-ka-01', district: 'Hampi' },
+    ],
+  };
+
+  const mockAreaMH01Demo = {
+    id: 'area-mh-demo-01',
+    code: 'MH-AREA-01',
+    name: 'Maharashtra Area',
+    state: 'Maharashtra',
+    description: 'Covers Mumbai, Pune, Panvel',
+    active: true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    districts: [
+      { id: 'ad-mh-1', administrativeAreaId: 'area-mh-demo-01', district: 'Mumbai' },
+      { id: 'ad-mh-2', administrativeAreaId: 'area-mh-demo-01', district: 'Pune' },
+      { id: 'ad-mh-3', administrativeAreaId: 'area-mh-demo-01', district: 'Panvel' },
     ],
   };
 
@@ -109,7 +140,7 @@ describe('Jurisdiction-Aware Data Isolation & Access Control (Comprehensive Suit
     type: OrganizationType.STATE_AUTHORITY,
     status: OrganizationStatus.ACTIVE,
     state: 'Karnataka',
-    district: null,
+    district: 'Bengaluru',
     isActive: true,
   };
 
@@ -168,6 +199,28 @@ describe('Jurisdiction-Aware Data Isolation & Access Control (Comprehensive Suit
     role: UserRole.SUPER_ADMIN,
     designation: 'Divisional Commissioner (Konkan Division)',
     organizationId: mockMH02OrgThane.id,
+    isActive: true,
+  };
+
+  const mockKarnatakaSuperAdmin: AuthenticatedUser = {
+    id: 'admin-ka-superadmin-uuid',
+    email: 'ka.superadmin@nlams.gov.in',
+    fullName: 'Karnataka Area Super Admin',
+    accountType: AccountType.GOVERNMENT_OFFICER,
+    role: UserRole.SUPER_ADMIN,
+    designation: 'Super Admin',
+    organizationId: mockKarnatakaOrg.id,
+    isActive: true,
+  };
+
+  const mockMaharashtraSuperAdmin: AuthenticatedUser = {
+    id: 'admin-mh-superadmin-uuid',
+    email: 'mh.superadmin@nlams.gov.in',
+    fullName: 'Maharashtra Area Super Admin',
+    accountType: AccountType.GOVERNMENT_OFFICER,
+    role: UserRole.SUPER_ADMIN,
+    designation: 'Super Admin',
+    organizationId: mockMH01OrgPune.id,
     isActive: true,
   };
 
@@ -261,6 +314,22 @@ describe('Jurisdiction-Aware Data Isolation & Access Control (Comprehensive Suit
     assignments: [],
   };
 
+  const mockProjectKA01 = {
+    id: 'proj-bengaluru-mysuru-expressway',
+    code: 'KA-BLR-MYS-2026',
+    title: 'Bengaluru Mysuru Economic Corridor',
+    status: ProjectStatus.UNDER_SCRUTINY,
+    category: ProjectCategory.HIGHWAY,
+    state: 'Karnataka',
+    districts: ['Bengaluru', 'Mysuru'],
+    implementingAgencyOrgId: mockKarnatakaOrg.id,
+    totalAreaHectares: 600.0,
+    estimatedCompensationInr: 3500000000,
+    disbursedCompensationInr: 1200000000,
+    isActive: true,
+    assignments: [],
+  };
+
   const mockParcelPune = {
     id: 'parcel-pune-001',
     surveyNumber: '142/1A',
@@ -293,6 +362,24 @@ describe('Jurisdiction-Aware Data Isolation & Access Control (Comprehensive Suit
     status: 'COMPENSATION_PENDING',
     marketRateInrPerHectare: 20000000,
     compensationInr: 42000000,
+    isActive: true,
+    parcelLandowners: [],
+  };
+
+  const mockParcelBengaluru = {
+    id: 'parcel-ka-blr-001',
+    surveyNumber: '55/4A',
+    projectId: mockProjectKA01.id,
+    project: mockProjectKA01,
+    village: 'Kengeri Hobli',
+    tehsil: 'Bengaluru South',
+    district: 'Bengaluru',
+    state: 'Karnataka',
+    landType: 'COMMERCIAL',
+    areaHectares: 3.5,
+    status: 'VERIFIED',
+    marketRateInrPerHectare: 25000000,
+    compensationInr: 87500000,
     isActive: true,
     parcelLandowners: [],
   };
@@ -337,6 +424,34 @@ describe('Jurisdiction-Aware Data Isolation & Access Control (Comprehensive Suit
             jurisdictionLevel: AdminJurisdictionLevel.STATE_AREA,
             isActive: true,
             administrativeArea: mockAreaMH02,
+          },
+        ],
+        projectAssignments: [],
+      },
+      [mockKarnatakaSuperAdmin.id]: {
+        ...mockKarnatakaSuperAdmin,
+        organization: mockKarnatakaOrg,
+        superAdminAssignments: [
+          {
+            id: 'saa-ka-01',
+            userId: mockKarnatakaSuperAdmin.id,
+            jurisdictionLevel: AdminJurisdictionLevel.STATE_AREA,
+            isActive: true,
+            administrativeArea: mockAreaKA01,
+          },
+        ],
+        projectAssignments: [],
+      },
+      [mockMaharashtraSuperAdmin.id]: {
+        ...mockMaharashtraSuperAdmin,
+        organization: mockMH01OrgPune,
+        superAdminAssignments: [
+          {
+            id: 'saa-mh-demo-01',
+            userId: mockMaharashtraSuperAdmin.id,
+            jurisdictionLevel: AdminJurisdictionLevel.STATE_AREA,
+            isActive: true,
+            administrativeArea: mockAreaMH01Demo,
           },
         ],
         projectAssignments: [],
@@ -433,6 +548,7 @@ describe('Jurisdiction-Aware Data Isolation & Access Control (Comprehensive Suit
         findUnique: jest.fn().mockImplementation(({ where }) => {
           if (where.id === mockProjectMH01.id) return Promise.resolve(mockProjectMH01);
           if (where.id === mockProjectMH02.id) return Promise.resolve(mockProjectMH02);
+          if (where.id === mockProjectKA01.id) return Promise.resolve(mockProjectKA01);
           return Promise.resolve(null);
         }),
         findMany: jest.fn().mockResolvedValue([mockProjectMH01]),
@@ -444,10 +560,11 @@ describe('Jurisdiction-Aware Data Isolation & Access Control (Comprehensive Suit
         findUnique: jest.fn().mockImplementation(({ where }) => {
           if (where.id === mockParcelPune.id) return Promise.resolve(mockParcelPune);
           if (where.id === mockParcelThane.id) return Promise.resolve(mockParcelThane);
+          if (where.id === mockParcelBengaluru.id) return Promise.resolve(mockParcelBengaluru);
           return Promise.resolve(null);
         }),
         findMany: jest.fn().mockImplementation(({ where }) => {
-          const allParcels = [mockParcelPune, mockParcelThane];
+          const allParcels = [mockParcelPune, mockParcelThane, mockParcelBengaluru];
           if (where?.district?.in) {
             const allowed = where.district.in.map((d: string) => d.toLowerCase());
             return Promise.resolve(allParcels.filter((p) => allowed.includes(p.district.toLowerCase())));
@@ -464,13 +581,20 @@ describe('Jurisdiction-Aware Data Isolation & Access Control (Comprehensive Suit
           if (where.id === mockAreaMH02.id || where.code === mockAreaMH02.code) {
             return Promise.resolve(mockAreaMH02);
           }
+          if (where.id === mockAreaKA01.id || where.code === mockAreaKA01.code) {
+            return Promise.resolve(mockAreaKA01);
+          }
+          if (where.id === mockAreaMH01Demo.id || where.code === mockAreaMH01Demo.code) {
+            return Promise.resolve(mockAreaMH01Demo);
+          }
           return Promise.resolve(null);
         }),
         findFirst: jest.fn().mockImplementation(({ where }) => {
           if (where?.state?.equals === 'Maharashtra') return Promise.resolve(mockAreaMH01);
+          if (where?.state?.equals === 'Karnataka') return Promise.resolve(mockAreaKA01);
           return Promise.resolve(null);
         }),
-        findMany: jest.fn().mockResolvedValue([mockAreaMH01, mockAreaMH02]),
+        findMany: jest.fn().mockResolvedValue([mockAreaMH01, mockAreaMH02, mockAreaKA01, mockAreaMH01Demo]),
         create: jest.fn(),
       },
       administrativeAreaDistrict: {
@@ -479,8 +603,14 @@ describe('Jurisdiction-Aware Data Isolation & Access Control (Comprehensive Suit
           if (district === 'pune' || district === 'satara' || district === 'kolhapur') {
             return Promise.resolve({ administrativeArea: mockAreaMH01 });
           }
-          if (district === 'thane' || district === 'mumbai' || district === 'palghar') {
+          if (district === 'thane' || district === 'palghar') {
             return Promise.resolve({ administrativeArea: mockAreaMH02 });
+          }
+          if (district === 'bengaluru' || district === 'mysuru' || district === 'hampi') {
+            return Promise.resolve({ administrativeArea: mockAreaKA01 });
+          }
+          if (district === 'mumbai' || district === 'panvel') {
+            return Promise.resolve({ administrativeArea: mockAreaMH01Demo });
           }
           return Promise.resolve(null);
         }),
@@ -492,6 +622,12 @@ describe('Jurisdiction-Aware Data Isolation & Access Control (Comprehensive Suit
           }
           if (where?.administrativeAreaId === mockAreaMH02.id) {
             return Promise.resolve([{ userId: mockMH02SuperAdmin.id }]);
+          }
+          if (where?.administrativeAreaId === mockAreaKA01.id) {
+            return Promise.resolve([{ userId: mockKarnatakaSuperAdmin.id }]);
+          }
+          if (where?.administrativeAreaId === mockAreaMH01Demo.id) {
+            return Promise.resolve([{ userId: mockMaharashtraSuperAdmin.id }]);
           }
           return Promise.resolve([{ userId: mockCentralSuperAdmin.id }]);
         }),
@@ -573,7 +709,6 @@ describe('Jurisdiction-Aware Data Isolation & Access Control (Comprehensive Suit
         accountType: AccountType.GOVERNMENT_OFFICER,
         organizationId: mockCentralOrg.id,
       };
-      // User with no active superAdminAssignment in DB
       const scope = await jurisdictionService.resolveEffectiveScope(inactiveAdminUser);
       expect(scope.isStateArea).toBe(false);
     });
@@ -960,4 +1095,101 @@ describe('Jurisdiction-Aware Data Isolation & Access Control (Comprehensive Suit
       expect(prisma.auditLog.create).toHaveBeenCalled();
     });
   });
+
+  // ============================================================================
+  // SECTION 6: SEED SUPER ADMIN ISOLATION & ROUTING (KA-AREA-01 vs MH-AREA-01)
+  // ============================================================================
+  describe('6. Seed Development Super Admin Isolation (Karnataka vs Maharashtra)', () => {
+    it('Scenario 31: ka.superadmin resolves to KA-AREA-01 covering Bengaluru, Mysuru, Hampi', async () => {
+      const scope = await jurisdictionService.resolveEffectiveScope(mockKarnatakaSuperAdmin);
+      expect(scope.level).toBe('STATE_AREA');
+      expect(scope.isStateArea).toBe(true);
+      expect(scope.isCentral).toBe(false);
+      expect(scope.state).toBe('Karnataka');
+      expect(scope.districts).toEqual(['Bengaluru', 'Mysuru', 'Hampi']);
+      expect(scope.administrativeAreaCode).toBe('KA-AREA-01');
+    });
+
+    it('Scenario 32: mh.superadmin resolves to MH-AREA-01 covering Mumbai, Pune, Panvel', async () => {
+      const scope = await jurisdictionService.resolveEffectiveScope(mockMaharashtraSuperAdmin);
+      expect(scope.level).toBe('STATE_AREA');
+      expect(scope.isStateArea).toBe(true);
+      expect(scope.isCentral).toBe(false);
+      expect(scope.state).toBe('Maharashtra');
+      expect(scope.districts).toEqual(['Mumbai', 'Pune', 'Panvel']);
+      expect(scope.administrativeAreaCode).toBe('MH-AREA-01');
+    });
+
+    it('Scenario 33: ka.superadmin can access Bengaluru parcel but CANNOT access Pune/Thane parcels', async () => {
+      const scope = await jurisdictionService.resolveEffectiveScope(mockKarnatakaSuperAdmin);
+      expect(jurisdictionService.canAccessParcel(scope, mockParcelBengaluru)).toBe(true);
+      expect(jurisdictionService.canAccessParcel(scope, mockParcelPune)).toBe(false);
+      expect(jurisdictionService.canAccessParcel(scope, mockParcelThane)).toBe(false);
+    });
+
+    it('Scenario 34: mh.superadmin can access Pune parcel but CANNOT access Bengaluru parcel', async () => {
+      const scope = await jurisdictionService.resolveEffectiveScope(mockMaharashtraSuperAdmin);
+      expect(jurisdictionService.canAccessParcel(scope, mockParcelPune)).toBe(true);
+      expect(jurisdictionService.canAccessParcel(scope, mockParcelBengaluru)).toBe(false);
+    });
+
+    it('Scenario 35: Officer registration in Mysuru (Karnataka) routes to KA-AREA-01 and ka.superadmin', async () => {
+      const result = await organizationsService.registerOfficer({
+        fullName: 'Shri Suresh Gowda',
+        email: 'suresh.gowda@karnataka.gov.in',
+        phone: '+91-9876543299',
+        employeeId: 'EMP-KA-MYS-001',
+        designation: 'Special Land Acquisition Officer',
+        departmentName: 'Mysuru Urban Development Authority',
+        organizationType: OrganizationType.DISTRICT_AUTHORITY,
+        state: 'Karnataka',
+        district: 'Mysuru',
+        officeAddress: 'MUDA Office, JLB Road, Mysuru',
+        requestedRole: UserRole.LAND_ACQUISITION_OFFICER,
+        password: 'Password@2026!',
+      });
+
+      expect(result.user.isActive).toBe(false);
+      expect(prisma.approvalRequest.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            requestType: ApprovalRequestType.OFFICER_REGISTRATION,
+            administrativeAreaId: mockAreaKA01.id,
+            assignedApproverId: mockKarnatakaSuperAdmin.id,
+            status: ApprovalRequestStatus.PENDING,
+          }),
+        }),
+      );
+    });
+
+    it('Scenario 36: Officer registration in Panvel (Maharashtra) routes to MH-AREA-01 and mh.superadmin', async () => {
+      const result = await organizationsService.registerOfficer({
+        fullName: 'Shri Sanjay Shinde',
+        email: 'sanjay.shinde@maharashtra.gov.in',
+        phone: '+91-9876543298',
+        employeeId: 'EMP-MH-PNV-001',
+        designation: 'Land Acquisition Officer',
+        departmentName: 'CIDCO Panvel Office',
+        organizationType: OrganizationType.DISTRICT_AUTHORITY,
+        state: 'Maharashtra',
+        district: 'Panvel',
+        officeAddress: 'CIDCO Bhavan, Panvel',
+        requestedRole: UserRole.LAND_ACQUISITION_OFFICER,
+        password: 'Password@2026!',
+      });
+
+      expect(result.user.isActive).toBe(false);
+      expect(prisma.approvalRequest.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            requestType: ApprovalRequestType.OFFICER_REGISTRATION,
+            administrativeAreaId: mockAreaMH01Demo.id,
+            assignedApproverId: mockMaharashtraSuperAdmin.id,
+            status: ApprovalRequestStatus.PENDING,
+          }),
+        }),
+      );
+    });
+  });
 });
+

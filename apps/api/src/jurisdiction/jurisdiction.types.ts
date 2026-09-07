@@ -12,6 +12,7 @@ export interface EffectiveJurisdictionScope {
   role: UserRole;
   accountType: AccountType;
   level: JurisdictionScopeLevel;
+  jurisdictionLevel?: string;
   isCentral: boolean;
   isStateArea: boolean;
   isStateScoped: boolean;
@@ -22,6 +23,12 @@ export interface EffectiveJurisdictionScope {
   administrativeAreaId?: string | null;
   administrativeAreaCode?: string | null;
   administrativeAreaName?: string | null;
+  administrativeArea?: {
+    id: string;
+    code: string;
+    name: string;
+    state: string;
+  } | null;
   adminJurisdictionLevel?: AdminJurisdictionLevel | null;
   organizationId?: string | null;
   organizationType?: string | null;

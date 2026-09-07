@@ -60,6 +60,7 @@ enum AdminJurisdictionLevel {
 enum ApprovalRequestType {
   OFFICER_REGISTRATION
   PIA_REGISTRATION
+  LAND_ACQUISITION_REQUEST
 }
 
 enum ApprovalRequestStatus {
