@@ -126,4 +126,29 @@ export class ApprovalRequestsController {
   ) {
     return this.organizationsService.rejectApprovalRequest(id, dto, user);
   }
+
+  @Post(':id/hold')
+  @Roles(
+    UserRole.SUPER_ADMIN,
+    UserRole.CENTRAL_OFFICER,
+    UserRole.STATE_OFFICER,
+    UserRole.DISTRICT_OFFICER,
+  )
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Place Onboarding / Acquisition Request On Hold',
+    description:
+      'Places an approval request on hold pending document clarification or administrative review.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Approval request placed on hold.',
+  })
+  async holdRequest(
+    @Param('id') id: string,
+    @Body() dto: ApprovalDecisionDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.organizationsService.holdApprovalRequest(id, dto, user);
+  }
 }

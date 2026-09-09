@@ -328,14 +328,9 @@ export class JurisdictionService {
     }
 
     if (scope.isStateArea) {
+      const orgWhere = this.buildOrganizationWhere(scope);
       return {
-        organization: {
-          state: scope.state ? { equals: scope.state, mode: 'insensitive' } : undefined,
-          district:
-            scope.districts.length > 0
-              ? { in: scope.districts, mode: 'insensitive' }
-              : undefined,
-        },
+        organization: orgWhere,
       };
     }
 
@@ -371,13 +366,32 @@ export class JurisdictionService {
     }
 
     if (scope.isStateArea) {
-      return {
-        state: scope.state ? { equals: scope.state, mode: 'insensitive' } : undefined,
-        district:
-          scope.districts.length > 0
-            ? { in: scope.districts, mode: 'insensitive' }
-            : undefined,
-      };
+      const orClauses: Prisma.OrganizationWhereInput[] = [];
+
+      // 1. District authorities / entities in covered districts
+      if (scope.state && scope.districts.length > 0) {
+        orClauses.push({
+          state: { equals: scope.state, mode: 'insensitive' },
+          district: { in: scope.districts, mode: 'insensitive' },
+        });
+      }
+
+      // 2. Parent state-level authority in caller state (where district is null/empty)
+      if (scope.state) {
+        orClauses.push({
+          state: { equals: scope.state, mode: 'insensitive' },
+          district: null,
+        });
+      }
+
+      // 3. User's own organization
+      if (scope.organizationId) {
+        orClauses.push({
+          id: scope.organizationId,
+        });
+      }
+
+      return { OR: orClauses };
     }
 
     if (scope.isStateScoped) {
@@ -408,6 +422,10 @@ export class JurisdictionService {
 
     if (scope.isStateArea) {
       const orConditions: Prisma.ApprovalRequestWhereInput[] = [];
+      if (scope.userId) {
+        orConditions.push({ assignedApproverId: scope.userId });
+        orConditions.push({ reviewedById: scope.userId });
+      }
       if (scope.administrativeAreaId) {
         orConditions.push({ administrativeAreaId: scope.administrativeAreaId });
       }
@@ -416,8 +434,6 @@ export class JurisdictionService {
           state: { equals: scope.state, mode: 'insensitive' },
           district: { in: scope.districts, mode: 'insensitive' },
         });
-      } else if (scope.state) {
-        orConditions.push({ state: { equals: scope.state, mode: 'insensitive' } });
       }
       return { OR: orConditions.length > 0 ? orConditions : undefined };
     }
@@ -610,6 +626,7 @@ export class JurisdictionService {
       id: string;
       organizationId: string;
       organization?: {
+        id?: string;
         state?: string | null;
         district?: string | null;
       } | null;
@@ -625,49 +642,11 @@ export class JurisdictionService {
     const org = targetUser.organization;
     if (!org) return false;
 
-    if (scope.isStateArea) {
-      if (
-        scope.state &&
-        org.state &&
-        org.state.toLowerCase() !== scope.state.toLowerCase()
-      ) {
-        return false;
-      }
-      if (scope.districts.length > 0) {
-        if (!org.district) return false;
-        return scope.districts.some(
-          (d) => d.toLowerCase() === org.district!.toLowerCase(),
-        );
-      }
-      return true;
-    }
-
-    if (scope.isStateScoped) {
-      return (
-        !scope.state ||
-        !org.state ||
-        org.state.toLowerCase() === scope.state.toLowerCase()
-      );
-    }
-
-    if (scope.isDistrictScoped) {
-      if (
-        scope.state &&
-        org.state &&
-        org.state.toLowerCase() !== scope.state.toLowerCase()
-      ) {
-        return false;
-      }
-      if (scope.districts.length > 0) {
-        if (!org.district) return false;
-        return scope.districts.some(
-          (d) => d.toLowerCase() === org.district!.toLowerCase(),
-        );
-      }
-      return true;
-    }
-
-    return false;
+    return this.canAccessOrganization(scope, {
+      id: targetUser.organizationId || (org as any).id || '',
+      state: org.state,
+      district: org.district,
+    });
   }
 
   canAccessOrganization(
@@ -679,7 +658,7 @@ export class JurisdictionService {
     },
   ): boolean {
     if (scope.isCentral) return true;
-    if (org.id === scope.organizationId) return true;
+    if (org.id && scope.organizationId && org.id === scope.organizationId) return true;
 
     if (scope.isProjectRestricted) {
       return org.id === scope.organizationId;
@@ -693,13 +672,15 @@ export class JurisdictionService {
       ) {
         return false;
       }
-      if (scope.districts.length > 0) {
-        if (!org.district) return false;
+      if (org.district && scope.districts.length > 0) {
         return scope.districts.some(
           (d) => d.toLowerCase() === org.district!.toLowerCase(),
         );
       }
-      return true;
+      if (!org.district && scope.state && org.state && org.state.toLowerCase() === scope.state.toLowerCase()) {
+        return true;
+      }
+      return false;
     }
 
     if (scope.isStateScoped) {
@@ -735,6 +716,8 @@ export class JurisdictionService {
     req: {
       id: string;
       administrativeAreaId?: string | null;
+      assignedApproverId?: string | null;
+      reviewedById?: string | null;
       state: string;
       district?: string | null;
       organizationId?: string | null;
@@ -743,6 +726,12 @@ export class JurisdictionService {
     if (scope.isCentral) return true;
 
     if (scope.isStateArea) {
+      if (req.assignedApproverId && req.assignedApproverId === scope.userId) {
+        return true;
+      }
+      if (req.reviewedById && req.reviewedById === scope.userId) {
+        return true;
+      }
       if (
         req.administrativeAreaId &&
         scope.administrativeAreaId &&
@@ -756,12 +745,13 @@ export class JurisdictionService {
       ) {
         return false;
       }
-      if (scope.districts.length > 0 && req.district) {
+      if (scope.districts.length > 0) {
+        if (!req.district) return false;
         return scope.districts.some(
           (d) => d.toLowerCase() === req.district!.toLowerCase(),
         );
       }
-      return true;
+      return false;
     }
 
     if (scope.isStateScoped) {
@@ -777,7 +767,7 @@ export class JurisdictionService {
           (d) => d.toLowerCase() === req.district!.toLowerCase(),
         );
       }
-      return true;
+      return false;
     }
 
     return req.organizationId === scope.organizationId;
@@ -877,12 +867,14 @@ export class JurisdictionService {
     state: string,
     district?: string | null,
   ): Promise<{ id: string; code: string; name: string; state: string } | null> {
-    if (district) {
+    const trimmedState = state.trim();
+    if (district && district.trim()) {
+      const trimmedDistrict = district.trim();
       const areaDistrict = await this.prisma.administrativeAreaDistrict.findFirst({
         where: {
-          district: { equals: district.trim(), mode: 'insensitive' },
+          district: { equals: trimmedDistrict, mode: 'insensitive' },
           administrativeArea: {
-            state: { equals: state.trim(), mode: 'insensitive' },
+            state: { equals: trimmedState, mode: 'insensitive' },
             active: true,
           },
         },
@@ -895,43 +887,56 @@ export class JurisdictionService {
       }
     }
 
-    // Fallback by state alone if exists
-    const area = await this.prisma.administrativeArea.findFirst({
-      where: {
-        state: { equals: state.trim(), mode: 'insensitive' },
-        active: true,
-      },
-    });
+    // Check all active administrative areas in this state
+    const matchingAreas =
+      (await this.prisma.administrativeArea.findMany({
+        where: {
+          state: { equals: trimmedState, mode: 'insensitive' },
+          active: true,
+        },
+      })) || [];
 
-    return area;
+    if (matchingAreas.length > 1 && !district) {
+      throw new BadRequestException(
+        'District is required because this state has multiple administrative areas.',
+      );
+    }
+
+    if (matchingAreas.length === 1) {
+      return matchingAreas[0];
+    }
+
+    return null;
   }
 
   async findApproversForArea(
     administrativeAreaId?: string | null,
-    state?: string | null,
-    district?: string | null,
+    _state?: string | null,
+    _district?: string | null,
   ): Promise<string[]> {
     if (administrativeAreaId) {
-      const assignments = await this.prisma.superAdminAssignment.findMany({
-        where: {
-          administrativeAreaId,
-          isActive: true,
-        },
-        select: { userId: true },
-      });
+      const assignments =
+        (await this.prisma.superAdminAssignment.findMany({
+          where: {
+            administrativeAreaId,
+            isActive: true,
+          },
+          select: { userId: true },
+        })) || [];
       if (assignments.length > 0) {
         return assignments.map((a) => a.userId);
       }
     }
 
     // Fallback: Central Super Admins
-    const centralAssignments = await this.prisma.superAdminAssignment.findMany({
-      where: {
-        jurisdictionLevel: AdminJurisdictionLevel.CENTRAL,
-        isActive: true,
-      },
-      select: { userId: true },
-    });
+    const centralAssignments =
+      (await this.prisma.superAdminAssignment.findMany({
+        where: {
+          jurisdictionLevel: AdminJurisdictionLevel.CENTRAL,
+          isActive: true,
+        },
+        select: { userId: true },
+      })) || [];
     if (centralAssignments.length > 0) {
       return centralAssignments.map((a) => a.userId);
     }

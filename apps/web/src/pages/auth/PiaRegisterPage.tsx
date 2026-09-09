@@ -15,7 +15,10 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { organizationsService } from '@/services/organizations.service';
+import type { PiaRegistrationInput } from '@/types/organization';
 import { ROUTES } from '@/constants/routes';
+import { StateDistrictSelector } from '@/components/common/StateDistrictSelector';
+import { isValidDistrictForState } from '@/data/indiaAdministrativeData';
 
 const piaRegistrationSchema = z.object({
   organizationName: z
@@ -26,8 +29,8 @@ const piaRegistrationSchema = z.object({
     .string()
     .min(2, 'Registration code / reference is required')
     .max(100),
-  state: z.string().min(2, 'State is required'),
-  district: z.string().min(2, 'District is required'),
+  state: z.string().min(2, 'HQ State / Union Territory is required'),
+  district: z.string().min(2, 'HQ District is required'),
   officeAddress: z.string().min(5, 'Office address is required').max(500),
   adminFullName: z
     .string()
@@ -48,6 +51,25 @@ const piaRegistrationSchema = z.object({
     .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
     .regex(/[0-9]/, 'Password must contain at least one number')
     .regex(/[^a-zA-Z0-9]/, 'Password must contain at least one special character'),
+  // Proposed Land Acquisition Details
+  projectName: z.string().min(3, 'Project name is required').max(200),
+  projectCode: z.string().min(2, 'Project code is required').max(50),
+  projectPurpose: z.string().min(3, 'Project purpose is required').max(200),
+  landRequirementArea: z.coerce.number().positive('Land area must be greater than 0'),
+  landRequirementUnit: z.enum(['HECTARES', 'ACRES', 'SQ_METERS']),
+  targetState: z.string().min(2, 'Target acquisition State / Union Territory is required'),
+  targetDistrict: z.string().min(2, 'Target acquisition District is required'),
+  proposedLandDescription: z.string().min(5, 'Proposed land description is required').max(1000),
+  projectDescription: z.string().optional(),
+  expectedTimelineMonths: z.coerce.number().int().positive('Timeline in months is required'),
+})
+.refine((data) => !data.state || !data.district || isValidDistrictForState(data.state, data.district), {
+  message: 'Selected Headquarters District does not belong to the selected State / Union Territory',
+  path: ['district'],
+})
+.refine((data) => !data.targetState || !data.targetDistrict || isValidDistrictForState(data.targetState, data.targetDistrict), {
+  message: 'Selected Target District does not belong to the selected State / Union Territory',
+  path: ['targetDistrict'],
 });
 
 type PiaRegistrationFormValues = z.infer<typeof piaRegistrationSchema>;
@@ -57,25 +79,45 @@ export function PiaRegisterPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [submittedOrg, setSubmittedOrg] = useState<{ name: string; code?: string | null } | null>(null);
+  const [submittedOrg, setSubmittedOrg] = useState<{
+    name: string;
+    code?: string | null;
+    hqState: string;
+    hqDistrict: string;
+    targetState: string;
+    targetDistrict: string;
+    projectName: string;
+  } | null>(null);
 
   const {
     register,
     handleSubmit,
+    setValue,
+    watch,
     formState: { errors },
   } = useForm<PiaRegistrationFormValues>({
     resolver: zodResolver(piaRegistrationSchema),
     defaultValues: {
       organizationName: '',
       registrationCode: '',
-      state: 'Maharashtra',
-      district: 'Mumbai City',
+      state: '',
+      district: '',
       officeAddress: '',
       adminFullName: '',
       adminEmail: '',
       adminPhone: '',
       adminDesignation: 'Chief Project Manager / Nodal Liaison',
       adminPassword: '',
+      projectName: '',
+      projectCode: '',
+      projectPurpose: 'Highway & Expressway Expansion',
+      landRequirementArea: 150,
+      landRequirementUnit: 'HECTARES',
+      targetState: '',
+      targetDistrict: '',
+      proposedLandDescription: 'Linear acquisition corridor for multi-lane expressway bypass.',
+      projectDescription: 'Phase 1 development and right-of-way clearance.',
+      expectedTimelineMonths: 24,
     },
   });
 
@@ -83,10 +125,38 @@ export function PiaRegisterPage() {
     setIsSubmitting(true);
     setErrorMsg(null);
     try {
-      await organizationsService.registerPia(values);
+      const payload: PiaRegistrationInput = {
+        organizationName: values.organizationName,
+        registrationCode: values.registrationCode,
+        state: values.state,
+        district: values.district,
+        officeAddress: values.officeAddress,
+        adminFullName: values.adminFullName,
+        adminEmail: values.adminEmail,
+        adminPhone: values.adminPhone,
+        adminDesignation: values.adminDesignation,
+        adminPassword: values.adminPassword,
+        projectName: values.projectName,
+        projectCode: values.projectCode,
+        projectPurpose: values.projectPurpose,
+        landRequirementArea: values.landRequirementArea,
+        landRequirementUnit: values.landRequirementUnit,
+        targetState: values.targetState,
+        targetDistrict: values.targetDistrict,
+        proposedLandDescription: values.proposedLandDescription,
+        projectDescription: values.projectDescription,
+        expectedTimelineMonths: values.expectedTimelineMonths,
+      };
+
+      await organizationsService.registerPia(payload);
       setSubmittedOrg({
         name: values.organizationName,
         code: values.registrationCode,
+        hqState: values.state,
+        hqDistrict: values.district,
+        targetState: values.targetState,
+        targetDistrict: values.targetDistrict,
+        projectName: values.projectName,
       });
       setIsSuccess(true);
     } catch (err: any) {
@@ -132,10 +202,10 @@ export function PiaRegisterPage() {
               <CheckCircle2 className="h-8 w-8 shrink-0 text-signal-600" />
               <div>
                 <h2 className="text-base font-bold text-signal-900">
-                  Application Submitted for Administrative Review
+                  Application & Acquisition Proposal Submitted for Review
                 </h2>
                 <p className="text-xs text-signal-700 mt-0.5">
-                  Your organization registration request has been recorded with status{' '}
+                  Your organization registration and proposed acquisition project have been submitted with status{' '}
                   <span className="font-mono font-bold bg-amber-100 text-amber-900 px-1.5 py-0.5 rounded text-[11px]">
                     PENDING_APPROVAL
                   </span>
@@ -146,9 +216,9 @@ export function PiaRegisterPage() {
 
             <div className="space-y-3 bg-paper-subtle p-5 rounded-md border border-ink-100 text-xs">
               <h3 className="font-bold text-ink-900 uppercase tracking-wider text-[11px]">
-                Registration Summary
+                Registration & Approval Routing Summary
               </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <span className="text-ink-500">Organization Name:</span>
                   <p className="font-semibold text-ink-900">{submittedOrg?.name}</p>
@@ -157,6 +227,24 @@ export function PiaRegisterPage() {
                   <span className="text-ink-500">Agency Code Reference:</span>
                   <p className="font-mono font-semibold text-ink-900">{submittedOrg?.code}</p>
                 </div>
+                <div>
+                  <span className="text-ink-500">Corporate HQ Location:</span>
+                  <p className="font-semibold text-ink-900">
+                    {submittedOrg?.hqDistrict}, {submittedOrg?.hqState}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-ink-500">Proposed Acquisition Target:</span>
+                  <p className="font-semibold text-terracotta-700 font-mono">
+                    {submittedOrg?.targetDistrict}, {submittedOrg?.targetState}
+                  </p>
+                </div>
+                <div className="sm:col-span-2 bg-paper p-3 rounded border border-ink-200">
+                  <span className="text-ink-500 font-medium">Competent Approval Authority:</span>
+                  <p className="font-semibold text-ink-900 mt-0.5">
+                    Assigned to <span className="text-terracotta-700 font-bold">{submittedOrg?.targetState} Administrative Area</span> Super Administrator (Target Jurisdiction).
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -164,13 +252,13 @@ export function PiaRegisterPage() {
               <p className="font-semibold text-ink-800">What happens next?</p>
               <ul className="list-disc list-inside space-y-1 text-ink-600 pl-1">
                 <li>
-                  A Central or State Administrator will review your incorporation details and statutory project allocation.
+                  The Super Admin of the target land acquisition jurisdiction ({submittedOrg?.targetState}) will review the company credentials and the proposed acquisition request.
                 </li>
                 <li>
-                  Your primary liaison credentials will remain inactive until the administrative review is approved.
+                  Your primary liaison credentials will remain inactive until administrative verification is approved.
                 </li>
                 <li>
-                  Once approved, your account will be activated and you may sign in at the standard portal login.
+                  Once approved, your organization and acquisition project will be activated in the portal.
                 </li>
               </ul>
             </div>
@@ -196,7 +284,7 @@ export function PiaRegisterPage() {
                 Project Implementing Agency (PIA) Registration
               </h2>
               <p className="text-xs text-ink-300 max-w-2xl leading-relaxed">
-                Corporations, concessionaires, and public sector undertakings (e.g. NHAI, DFCCIL, Metro Rail Corp, or private EPC contractors) executing approved national projects may submit registration details.
+                Corporations, concessionaires, and public sector undertakings (e.g. NHAI, DFCCIL, Metro Rail Corp, or private EPC contractors) executing approved national projects may submit registration details and proposed land acquisitions.
               </p>
             </div>
 
@@ -204,8 +292,7 @@ export function PiaRegisterPage() {
             <div className="bg-amber-50/80 border-b border-amber-200 p-4 flex items-start gap-3 text-xs text-amber-900">
               <Info className="h-4 w-4 text-amber-700 shrink-0 mt-0.5" />
               <div>
-                <span className="font-bold">Application Notice:</span> Submission creates a{' '}
-                <span className="font-semibold">PENDING_APPROVAL</span> entity. External statutory registries (MCA, GST, DIN) are verified administratively by designated Central/State authorities.
+                <span className="font-bold">Jurisdiction Routing Notice:</span> Applications are reviewed by the competent Super Administrator of the <span className="font-semibold underline">Target Land Acquisition Jurisdiction</span>, regardless of where your corporate headquarters is located.
               </div>
             </div>
 
@@ -222,7 +309,7 @@ export function PiaRegisterPage() {
                 <div className="flex items-center gap-2 pb-2 border-b border-ink-100">
                   <Building2 className="h-4 w-4 text-terracotta-600" />
                   <h3 className="text-xs font-bold uppercase tracking-wider text-ink-800">
-                    1. Corporate & Agency Details
+                    1. Corporate & Headquarters Details
                   </h3>
                 </div>
 
@@ -261,38 +348,24 @@ export function PiaRegisterPage() {
                     )}
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold text-ink-700">
-                      Headquarters State *
-                    </label>
-                    <input
-                      type="text"
-                      {...register('state')}
-                      placeholder="e.g. Maharashtra"
-                      className="w-full h-9 rounded-sm border border-ink-300 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-ink-900"
+                  <div className="sm:col-span-2">
+                    <StateDistrictSelector
+                      stateValue={watch('state') || ''}
+                      onStateChange={(val) => {
+                        setValue('state', val, { shouldValidate: true });
+                        setValue('district', '', { shouldValidate: true });
+                      }}
+                      districtValue={watch('district') || ''}
+                      onDistrictChange={(val) => setValue('district', val, { shouldValidate: true })}
+                      stateLabel="Headquarters State / Union Territory"
+                      districtLabel="Headquarters District"
+                      stateError={errors.state?.message}
+                      districtError={errors.district?.message}
+                      stateId="hq-state-select"
+                      districtId="hq-district-select"
+                      stateNameAttr="state"
+                      districtNameAttr="district"
                     />
-                    {errors.state && (
-                      <p className="text-[11px] text-rust-600 font-medium">
-                        {errors.state.message}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold text-ink-700">
-                      District / City *
-                    </label>
-                    <input
-                      type="text"
-                      {...register('district')}
-                      placeholder="e.g. Mumbai City"
-                      className="w-full h-9 rounded-sm border border-ink-300 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-ink-900"
-                    />
-                    {errors.district && (
-                      <p className="text-[11px] text-rust-600 font-medium">
-                        {errors.district.message}
-                      </p>
-                    )}
                   </div>
 
                   <div className="space-y-1 sm:col-span-2">
@@ -411,11 +484,150 @@ export function PiaRegisterPage() {
                 </div>
               </div>
 
+              {/* Section 3: Proposed Land Acquisition Project */}
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 pb-2 border-b border-ink-100">
+                  <Building2 className="h-4 w-4 text-terracotta-600" />
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-ink-800">
+                    3. Proposed Land Acquisition Project (Determines Approval Jurisdiction)
+                  </h3>
+                </div>
+
+                <div className="bg-terracotta-50/70 border border-terracotta-200 rounded p-3 text-xs text-terracotta-900 flex items-start gap-2">
+                  <Info className="h-4 w-4 text-terracotta-700 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold">Target Jurisdiction Routing:</span> This acquisition request will be reviewed by the Super Administrator assigned to the <span className="font-semibold underline">Target State & District</span>.
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-ink-700">
+                      Project Name *
+                    </label>
+                    <input
+                      type="text"
+                      {...register('projectName')}
+                      placeholder="e.g. Bengaluru-Chennai Expressway Package 2"
+                      className="w-full h-9 rounded-sm border border-ink-300 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-ink-900"
+                    />
+                    {errors.projectName && (
+                      <p className="text-[11px] text-rust-600 font-medium">
+                        {errors.projectName.message}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-ink-700">
+                      Project Code *
+                    </label>
+                    <input
+                      type="text"
+                      {...register('projectCode')}
+                      placeholder="e.g. EXP-BCE-PKG2"
+                      className="w-full h-9 rounded-sm border border-ink-300 px-3 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-ink-900"
+                    />
+                    {errors.projectCode && (
+                      <p className="text-[11px] text-rust-600 font-medium">
+                        {errors.projectCode.message}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <StateDistrictSelector
+                      stateValue={watch('targetState') || ''}
+                      onStateChange={(val) => {
+                        setValue('targetState', val, { shouldValidate: true });
+                        setValue('targetDistrict', '', { shouldValidate: true });
+                      }}
+                      districtValue={watch('targetDistrict') || ''}
+                      onDistrictChange={(val) => setValue('targetDistrict', val, { shouldValidate: true })}
+                      stateLabel="Target Acquisition State / Union Territory"
+                      districtLabel="Target Acquisition District"
+                      stateError={errors.targetState?.message}
+                      districtError={errors.targetDistrict?.message}
+                      stateId="target-state-select"
+                      districtId="target-district-select"
+                      stateNameAttr="targetState"
+                      districtNameAttr="targetDistrict"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-ink-700">
+                      Land Area Requirement *
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      {...register('landRequirementArea')}
+                      placeholder="e.g. 150"
+                      className="w-full h-9 rounded-sm border border-ink-300 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-ink-900"
+                    />
+                    {errors.landRequirementArea && (
+                      <p className="text-[11px] text-rust-600 font-medium">
+                        {errors.landRequirementArea.message}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-ink-700">
+                      Unit of Measure *
+                    </label>
+                    <select
+                      {...register('landRequirementUnit')}
+                      className="w-full h-9 rounded-sm border border-ink-300 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-ink-900 bg-paper"
+                    >
+                      <option value="HECTARES">Hectares</option>
+                      <option value="ACRES">Acres</option>
+                      <option value="SQ_METERS">Square Meters</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1 sm:col-span-2">
+                    <label className="text-xs font-semibold text-ink-700">
+                      Project Purpose / Public Utility *
+                    </label>
+                    <input
+                      type="text"
+                      {...register('projectPurpose')}
+                      placeholder="e.g. National Expressway Corridor Construction & Right-of-Way"
+                      className="w-full h-9 rounded-sm border border-ink-300 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-ink-900"
+                    />
+                    {errors.projectPurpose && (
+                      <p className="text-[11px] text-rust-600 font-medium">
+                        {errors.projectPurpose.message}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-1 sm:col-span-2">
+                    <label className="text-xs font-semibold text-ink-700">
+                      Proposed Land Acquisition Description *
+                    </label>
+                    <textarea
+                      rows={2}
+                      {...register('proposedLandDescription')}
+                      placeholder="Describe the alignment, villages involved, and key survey landmarks"
+                      className="w-full rounded-sm border border-ink-300 p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-ink-900"
+                    />
+                    {errors.proposedLandDescription && (
+                      <p className="text-[11px] text-rust-600 font-medium">
+                        {errors.proposedLandDescription.message}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               {/* Submit Actions */}
               <div className="pt-4 border-t border-ink-200 flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div className="text-[11px] text-ink-500 flex items-center gap-1.5">
                   <ShieldCheck className="h-3.5 w-3.5 text-terracotta-600" />
-                  Protected by 256-bit statutory encryption & audit logging.
+                  Protected by 256-bit statutory encryption & jurisdiction-scoped audit trail.
                 </div>
 
                 <div className="flex items-center gap-3 w-full sm:w-auto">
@@ -439,7 +651,7 @@ export function PiaRegisterPage() {
                         Submitting Application...
                       </>
                     ) : (
-                      'Submit Registration'
+                      'Submit Registration & Proposal'
                     )}
                   </Button>
                 </div>

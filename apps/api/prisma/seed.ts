@@ -7,6 +7,7 @@ import {
   AdminJurisdictionLevel,
 } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { seedDemoData } from './demo-seed';
 
 const prisma = new PrismaClient();
 
@@ -451,6 +452,9 @@ async function main() {
 
   console.log(`✅ Seeded 5 administrative organizations, 2 AdministrativeAreas (KA-AREA-01, MH-AREA-01) with district mappings.`);
   console.log(`✅ Seeded 2 Area-scoped Super Admins (ka.superadmin@nlams.gov.in, mh.superadmin@nlams.gov.in) and ${seedUsers.length} canonical role users.`);
+
+  // Seed realistic demo acquisition data
+  await seedDemoData();
 }
 
 main()
@@ -461,3 +465,4 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
+

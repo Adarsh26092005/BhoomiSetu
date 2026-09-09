@@ -7,7 +7,7 @@
  * not a rewrite.
  */
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api/v1'
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3001/api/v1'
 
 export class ApiClientError extends Error {
     constructor(
@@ -26,11 +26,22 @@ interface RequestOptions extends RequestInit {
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
     const { authToken, headers, ...rest } = options
 
+    let token = authToken || localStorage.getItem('nlams_access_token') || null
+    if (!token) {
+        try {
+            const raw = localStorage.getItem('nlams-auth')
+            if (raw) {
+                const parsed = JSON.parse(raw)
+                token = parsed?.state?.session?.tokens?.accessToken || null
+            }
+        } catch {}
+    }
+
     const response = await fetch(`${API_BASE_URL}${path}`, {
         ...rest,
         headers: {
             'Content-Type': 'application/json',
-            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
             ...headers,
         },
     })

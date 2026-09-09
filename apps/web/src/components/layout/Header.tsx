@@ -15,54 +15,66 @@ export function Header() {
         navigate(ROUTES.login)
     }
 
-    const getJurisdictionBadge = (user: any) => {
+    const effectiveScope = useAuthStore(
+        (state) => state.effectiveScope || state.session?.user?.effectiveScope,
+    )
+
+    const getJurisdictionBadge = (user: any, scope: any) => {
         if (!user) return null
 
         if (user.role === 'SUPER_ADMIN') {
-            if (user.jurisdiction?.areaCode) {
-                const districts = user.jurisdiction?.districts?.join(', ') || ''
+            if (scope?.isStateArea && scope?.state) {
+                const areaName = scope.administrativeAreaName || `${scope.state} Area`
+                const districts = scope.districts && scope.districts.length > 0
+                    ? ` • ${scope.districts.join(' • ')}`
+                    : ''
                 return {
-                    label: `${user.organization?.state || 'State'} • ${user.jurisdiction.areaCode}${districts ? ` (${districts})` : ''}`,
+                    label: `${areaName}${districts}`,
                     type: 'area',
                 }
             }
-            if (user.organization?.type === 'CENTRAL_MINISTRY' || !user.organization?.state) {
+            if (scope?.isCentral || user.organization?.type === 'CENTRAL_MINISTRY' || !scope?.state) {
                 return { label: 'National Jurisdiction', type: 'central' }
             }
-            if (user.organization?.district) {
-                return { label: `${user.organization.district} District`, type: 'district' }
+            if (scope?.districts && scope.districts.length > 0) {
+                return { label: `${scope.state || 'State'} • ${scope.districts.join(', ')}`, type: 'area' }
             }
-            return { label: `${user.organization.state}`, type: 'state' }
+            return { label: `${scope?.state || user.organization?.state || 'State Area'}`, type: 'state' }
         }
 
         if (user.role === 'CENTRAL_OFFICER') {
-            return { label: 'National Jurisdiction', type: 'central' }
+            return { label: 'National Jurisdiction • Central Authority', type: 'central' }
         }
 
         if (user.role === 'STATE_OFFICER') {
+            const stateName = scope?.state || user.organization?.state || 'State Authority'
             return {
-                label: user.organization?.state ? `${user.organization.state}` : 'State Authority',
+                label: `${stateName} State Authority`,
                 type: 'state',
             }
         }
 
         if (user.accountType === 'PIA_USER' || user.role === 'PROJECT_IMPLEMENTING_AGENCY') {
             const agencyName = user.organization?.name || 'Implementing Agency'
-            return { label: `Agency: ${agencyName} • Assigned Projects`, type: 'pia' }
+            return { label: `Agency: ${agencyName} • Own Projects`, type: 'pia' }
+        }
+
+        if (scope?.districts && scope.districts.length > 0) {
+            return { label: `${scope.districts.join(', ')} • ${scope.state || user.organization?.state || 'District Authority'}`, type: 'district' }
         }
 
         if (user.organization?.district) {
-            return { label: `${user.organization.district} District`, type: 'district' }
+            return { label: `${user.organization.district} District Authority`, type: 'district' }
         }
 
         if (user.organization?.state) {
-            return { label: `${user.organization.state}`, type: 'state' }
+            return { label: `${user.organization.state} Authority`, type: 'state' }
         }
 
         return { label: 'National Jurisdiction', type: 'central' }
     }
 
-    const badge = getJurisdictionBadge(session?.user)
+    const badge = getJurisdictionBadge(session?.user, effectiveScope)
 
     return (
         <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-ink-200 bg-paper px-4 md:px-6">

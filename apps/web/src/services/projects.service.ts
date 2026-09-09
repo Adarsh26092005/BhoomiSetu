@@ -1,4 +1,3 @@
-import { MOCK_PROJECTS } from '@/mock/projects';
 import type {
   AcquisitionProject,
   CreateProjectPayload,
@@ -10,11 +9,6 @@ import type {
   UpdateProjectStatusPayload,
 } from '@/types';
 import { apiClient } from './api-client';
-
-const IS_DEV = import.meta.env.DEV;
-
-// In-memory fallback dataset for offline development / preview
-let inMemoryProjects: AcquisitionProject[] = [...MOCK_PROJECTS];
 
 function mapBackendToAcquisitionProject(raw: any): AcquisitionProject {
   const agencyName =
@@ -74,213 +68,70 @@ export type ProjectListResult = AcquisitionProject[] & {
 
 export const projectsService = {
   async list(params?: ProjectQueryParams): Promise<ProjectListResult> {
-    try {
-      const query = new URLSearchParams();
-      if (params?.page) query.set('page', String(params.page));
-      if (params?.limit) query.set('limit', String(params.limit));
-      if (params?.search) query.set('search', params.search);
-      if (params?.status && params.status !== 'ALL') query.set('status', params.status);
-      if (params?.category && params.category !== 'ALL') query.set('category', params.category);
-      if (params?.state && params.state !== 'ALL') query.set('state', params.state);
-      if (params?.district) query.set('district', params.district);
-      if (params?.implementingAgencyOrgId) query.set('implementingAgencyOrgId', params.implementingAgencyOrgId);
-      if (params?.sortBy) query.set('sortBy', params.sortBy);
-      if (params?.sortOrder) query.set('sortOrder', params.sortOrder);
+    const query = new URLSearchParams();
+    if (params?.page) query.set('page', String(params.page));
+    if (params?.limit) query.set('limit', String(params.limit));
+    if (params?.search) query.set('search', params.search);
+    if (params?.status && params.status !== 'ALL') query.set('status', params.status);
+    if (params?.category && params.category !== 'ALL') query.set('category', params.category);
+    if (params?.state && params.state !== 'ALL') query.set('state', params.state);
+    if (params?.district) query.set('district', params.district);
+    if (params?.implementingAgencyOrgId) query.set('implementingAgencyOrgId', params.implementingAgencyOrgId);
+    if (params?.sortBy) query.set('sortBy', params.sortBy);
+    if (params?.sortOrder) query.set('sortOrder', params.sortOrder);
 
-      const res = await apiClient.get<any>(`/projects?${query.toString()}`);
-      if (res?.items) {
-        const items = res.items.map(mapBackendToAcquisitionProject);
-        return Object.assign(items, {
-          items,
-          total: res.total,
-          page: res.page,
-          limit: res.limit,
-          totalPages: res.totalPages,
-        });
-      }
-      if (res?.data?.items) {
-        const items = res.data.items.map(mapBackendToAcquisitionProject);
-        return Object.assign(items, {
-          items,
-          total: res.data.total,
-          page: res.data.page,
-          limit: res.data.limit,
-          totalPages: res.data.totalPages,
-        });
-      }
-    } catch (err) {
-      if (!IS_DEV) {
-        throw err;
-      }
-      console.warn('[ProjectsService] Backend unreachable in DEV mode, using fallback data.', err);
-    }
-
-    // Dev-only fallback
-    let filtered = [...inMemoryProjects];
-    if (params?.status && params.status !== 'ALL') {
-      filtered = filtered.filter((p) => p.status === params.status);
-    }
-    if (params?.category && params.category !== 'ALL') {
-      filtered = filtered.filter((p) => p.category === params.category);
-    }
-    if (params?.state && params.state !== 'ALL') {
-      filtered = filtered.filter((p) => p.state === params.state);
-    }
-    if (params?.search) {
-      const q = params.search.toLowerCase();
-      filtered = filtered.filter(
-        (p) =>
-          p.title.toLowerCase().includes(q) ||
-          p.code.toLowerCase().includes(q) ||
-          p.implementingAgency.toLowerCase().includes(q) ||
-          p.districts.some((d) => d.toLowerCase().includes(q)),
-      );
-    }
-
-    const page = params?.page || 1;
-    const limit = params?.limit || 20;
-    const start = (page - 1) * limit;
-    const items = filtered.slice(start, start + limit);
+    const res = await apiClient.get<any>(`/projects?${query.toString()}`);
+    const rawItems = res?.items || res?.data?.items || (Array.isArray(res) ? res : []);
+    const items = rawItems.map(mapBackendToAcquisitionProject);
 
     return Object.assign(items, {
       items,
-      total: filtered.length,
-      page,
-      limit,
-      totalPages: Math.ceil(filtered.length / limit) || 1,
+      total: res?.total ?? res?.data?.total ?? items.length,
+      page: res?.page ?? res?.data?.page ?? 1,
+      limit: res?.limit ?? res?.data?.limit ?? (params?.limit || 20),
+      totalPages: res?.totalPages ?? res?.data?.totalPages ?? 1,
     });
   },
 
   async getById(id: string): Promise<AcquisitionProject> {
-    try {
-      const res = await apiClient.get<any>(`/projects/${id}`);
-      if (res?.id) return mapBackendToAcquisitionProject(res);
-      if (res?.data?.id) return mapBackendToAcquisitionProject(res.data);
-    } catch (err) {
-      if (!IS_DEV) {
-        throw err;
-      }
-      console.warn(`[ProjectsService] Backend unreachable for project ID "${id}" in DEV, falling back.`, err);
-    }
-
-    const found = inMemoryProjects.find((p) => p.id === id);
-    if (!found) {
-      throw new Error(`Project with ID "${id}" not found`);
-    }
-    return found;
+    const res = await apiClient.get<any>(`/projects/${id}`);
+    if (res?.id) return mapBackendToAcquisitionProject(res);
+    if (res?.data?.id) return mapBackendToAcquisitionProject(res.data);
+    throw new Error(`Project with ID "${id}" not found`);
   },
 
   async create(payload: CreateProjectPayload): Promise<AcquisitionProject> {
-    try {
-      const res = await apiClient.post<any>('/projects', payload);
-      if (res?.id) {
-        const created = mapBackendToAcquisitionProject(res);
-        inMemoryProjects.unshift(created);
-        return created;
-      }
-      if (res?.data?.id) {
-        const created = mapBackendToAcquisitionProject(res.data);
-        inMemoryProjects.unshift(created);
-        return created;
-      }
-    } catch (err) {
-      if (!IS_DEV) {
-        throw err;
-      }
-      console.warn('[ProjectsService] Backend create failed in DEV mode, creating local mock.', err);
-    }
-
-    const defaultTimeline: ProjectTimelineEvent[] = [
-      { id: '1', stage: 'DRAFT', label: 'Section 4 SIA Draft Initiated', date: new Date().toISOString().split('T')[0], completed: true },
-    ];
-
-    const newProject: AcquisitionProject = {
-      id: `proj-${Date.now()}`,
-      code: payload.code.trim(),
-      title: payload.title.trim(),
-      description: payload.description || null,
-      category: payload.category || 'HIGHWAY',
-      status: 'DRAFT',
-      implementingAgency: 'Implementing Agency',
-      state: payload.state,
-      districts: payload.districts,
-      totalAreaHectares: payload.totalAreaHectares || 0,
-      parcelCount: 0,
-      affectedLandowners: 0,
-      estimatedCompensationInr: payload.estimatedCompensationInr || 0,
-      disbursedCompensationInr: 0,
-      notifiedOn: payload.notifiedOn || new Date().toISOString().split('T')[0],
-      targetCompletionOn: payload.targetCompletionOn || '',
-      timeline: defaultTimeline,
-    };
-    inMemoryProjects.unshift(newProject);
-    return newProject;
+    const res = await apiClient.post<any>('/projects', payload);
+    if (res?.id) return mapBackendToAcquisitionProject(res);
+    if (res?.data?.id) return mapBackendToAcquisitionProject(res.data);
+    return res;
   },
 
   async update(id: string, payload: UpdateProjectPayload): Promise<AcquisitionProject> {
-    try {
-      const res = await apiClient.patch<any>(`/projects/${id}`, payload);
-      if (res?.id) return mapBackendToAcquisitionProject(res);
-      if (res?.data?.id) return mapBackendToAcquisitionProject(res.data);
-    } catch (err) {
-      if (!IS_DEV) {
-        throw err;
-      }
-    }
-
-    const idx = inMemoryProjects.findIndex((p) => p.id === id);
-    if (idx === -1) throw new Error('Project not found');
-    inMemoryProjects[idx] = {
-      ...inMemoryProjects[idx],
-      ...payload,
-    };
-    return inMemoryProjects[idx];
+    const res = await apiClient.patch<any>(`/projects/${id}`, payload);
+    if (res?.id) return mapBackendToAcquisitionProject(res);
+    if (res?.data?.id) return mapBackendToAcquisitionProject(res.data);
+    return res;
   },
 
   async updateStatus(id: string, payload: UpdateProjectStatusPayload): Promise<AcquisitionProject> {
-    try {
-      const res = await apiClient.patch<any>(`/projects/${id}/status`, payload);
-      if (res?.id) return mapBackendToAcquisitionProject(res);
-      if (res?.data?.id) return mapBackendToAcquisitionProject(res.data);
-    } catch (err) {
-      if (!IS_DEV) {
-        throw err;
-      }
-    }
-
-    const idx = inMemoryProjects.findIndex((p) => p.id === id);
-    if (idx === -1) throw new Error('Project not found');
-    inMemoryProjects[idx] = {
-      ...inMemoryProjects[idx],
-      status: payload.status,
-    };
-    return inMemoryProjects[idx];
+    const res = await apiClient.patch<any>(`/projects/${id}/status`, payload);
+    if (res?.id) return mapBackendToAcquisitionProject(res);
+    if (res?.data?.id) return mapBackendToAcquisitionProject(res.data);
+    return res;
   },
 
   async getSummaryMetrics(): Promise<ProjectSummaryKpis> {
-    try {
-      const res = await apiClient.get<any>('/projects/summary');
-      if (res?.totalProjects !== undefined) return res;
-      if (res?.data?.totalProjects !== undefined) return res.data;
-    } catch (err) {
-      if (!IS_DEV) {
-        throw err;
-      }
-    }
-
-    const totalArea = inMemoryProjects.reduce((sum, p) => sum + p.totalAreaHectares, 0);
-    const totalEstimated = inMemoryProjects.reduce((sum, p) => sum + p.estimatedCompensationInr, 0);
-    const totalDisbursed = inMemoryProjects.reduce((sum, p) => sum + p.disbursedCompensationInr, 0);
-    const inProcess = inMemoryProjects.filter((p) => p.status !== 'COMPLETED' && p.status !== 'REJECTED').length;
-    const completed = inMemoryProjects.filter((p) => p.status === 'COMPLETED' || p.status === 'POSSESSION_COMPLETED').length;
-
+    const res = await apiClient.get<any>('/projects/summary');
+    if (res?.totalProjects !== undefined) return res;
+    if (res?.data?.totalProjects !== undefined) return res.data;
     return {
-      totalProjects: inMemoryProjects.length,
-      inStatutoryProcess: inProcess,
-      completedHandover: completed,
-      totalAreaHectares: Math.round(totalArea * 100) / 100,
-      totalEstimatedCompensationInr: totalEstimated,
-      totalDisbursedCompensationInr: totalDisbursed,
+      totalProjects: 0,
+      inStatutoryProcess: 0,
+      completedHandover: 0,
+      totalAreaHectares: 0,
+      totalEstimatedCompensationInr: 0,
+      totalDisbursedCompensationInr: 0,
     };
   },
 
@@ -310,10 +161,8 @@ export const projectsService = {
       const res = await apiClient.get<any>(`/projects/${id}/activity`);
       if (Array.isArray(res)) return res;
       if (Array.isArray(res?.data)) return res.data;
-    } catch (err) {
-      if (!IS_DEV) {
-        throw err;
-      }
+    } catch {
+      return [];
     }
     return [];
   },
@@ -323,10 +172,8 @@ export const projectsService = {
       const res = await apiClient.get<any>(`/projects/${id}/assignments`);
       if (Array.isArray(res)) return res;
       if (Array.isArray(res?.data)) return res.data;
-    } catch (err) {
-      if (!IS_DEV) {
-        throw err;
-      }
+    } catch {
+      return [];
     }
     return [];
   },

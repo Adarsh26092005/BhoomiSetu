@@ -11,10 +11,18 @@ import {
 } from 'lucide-react'
 import { ROUTES } from '@/constants/routes'
 
+import { useAuthStore } from '@/store/auth.store'
+import { UserCheck2 } from 'lucide-react'
+
 export function QuickActions() {
     const navigate = useNavigate()
+    const userRole = useAuthStore((state) => state.session?.user?.role)
+    const isSuperAdmin = userRole === 'SUPER_ADMIN'
 
     const actions = [
+        ...(isSuperAdmin
+            ? [{ label: 'Approvals & History', path: ROUTES.piaApprovals, icon: UserCheck2, color: 'text-amber-800 bg-amber-50' }]
+            : []),
         { label: 'Browse Projects', path: ROUTES.projects, icon: Landmark, color: 'text-ink-900 bg-ink-100' },
         { label: 'Survey Parcels', path: ROUTES.parcels, icon: MapPinned, color: 'text-terracotta-700 bg-terracotta-50' },
         { label: 'GIS Cadastre', path: ROUTES.gis, icon: Map, color: 'text-terracotta-700 bg-terracotta-50' },

@@ -11,7 +11,7 @@ export function AdminLoginPage() {
   const loginMutation = useLogin();
 
   const [email, setEmail] = React.useState('superadmin@nlams.gov.in');
-  const [password, setPassword] = React.useState('demoPassword123');
+  const [password, setPassword] = React.useState('DevAdmin@NLAMS2026!');
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
 
   const from = (location.state as { from?: { pathname?: string } })?.from?.pathname || ROUTES.dashboard;
@@ -33,23 +33,6 @@ export function AdminLoginPage() {
         err instanceof Error
           ? err.message
           : 'Authentication failed. Please verify credentials or contact national security operations.';
-      setErrorMsg(message);
-    }
-  };
-
-  const handleQuickDemo = async () => {
-    setEmail('superadmin@nlams.gov.in');
-    setPassword('demoPassword123');
-    setErrorMsg(null);
-    try {
-      await loginMutation.mutateAsync({
-        email: 'superadmin@nlams.gov.in',
-        password: 'demoPassword123',
-        loginType: 'ADMIN',
-      });
-      navigate(from, { replace: true });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Demo authentication failed.';
       setErrorMsg(message);
     }
   };
@@ -165,17 +148,51 @@ export function AdminLoginPage() {
           </div>
 
           {/* Quick Demo Access */}
-          <div className="border-t border-ink-800 pt-4 text-center">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleQuickDemo}
-              disabled={loginMutation.isPending}
-              className="w-full text-xs text-ink-300 border-ink-700 hover:bg-ink-800"
-            >
-              Fill Demo Admin (Dr. Rajesh Sharma • Central Super Admin)
-            </Button>
+          <div className="border-t border-ink-800 pt-4 space-y-2">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-ink-400 text-center">
+              Quick Sign In (Seeded Super Admins)
+            </p>
+            <div className="grid grid-cols-1 gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setEmail('ka.superadmin@nlams.gov.in');
+                  setPassword('NLAMS@KA2026#Admin');
+                }}
+                disabled={loginMutation.isPending}
+                className="w-full text-xs text-left justify-start text-ink-300 border-ink-700 hover:bg-ink-800"
+              >
+                <span className="font-bold text-terracotta-400 mr-2">KA-AREA-01:</span> Karnataka Super Admin (Bengaluru • Mysuru • Hampi)
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setEmail('mh.superadmin@nlams.gov.in');
+                  setPassword('NLAMS@MH2026#Admin');
+                }}
+                disabled={loginMutation.isPending}
+                className="w-full text-xs text-left justify-start text-ink-300 border-ink-700 hover:bg-ink-800"
+              >
+                <span className="font-bold text-terracotta-400 mr-2">MH-AREA-01:</span> Maharashtra Super Admin (Mumbai • Pune • Panvel)
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setEmail('superadmin@nlams.gov.in');
+                  setPassword('DevAdmin@NLAMS2026!');
+                }}
+                disabled={loginMutation.isPending}
+                className="w-full text-xs text-left justify-start text-ink-300 border-ink-700 hover:bg-ink-800"
+              >
+                <span className="font-bold text-blue-400 mr-2">CENTRAL:</span> Central Super Admin (Nationwide Jurisdiction)
+              </Button>
+            </div>
           </div>
 
           <div className="text-center pt-1">

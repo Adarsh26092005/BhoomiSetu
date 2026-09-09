@@ -17,6 +17,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { organizationsService } from '@/services/organizations.service';
 import { ROUTES } from '@/constants/routes';
+import { StateDistrictSelector } from '@/components/common/StateDistrictSelector';
+import { isValidDistrictForState } from '@/data/indiaAdministrativeData';
 
 const officerRegistrationSchema = z
   .object({
@@ -49,8 +51,8 @@ const officerRegistrationSchema = z
         required_error: 'Please select an organization tier',
       },
     ),
-    state: z.string().min(2, 'State of jurisdiction is required'),
-    district: z.string().min(2, 'District of jurisdiction is required'),
+    state: z.string().min(2, 'State / Union Territory is required'),
+    district: z.string().min(2, 'District is required'),
     officeAddress: z.string().min(5, 'Official office address is required'),
     requestedRole: z.enum(
       [
@@ -80,6 +82,10 @@ const officerRegistrationSchema = z
   .refine((data) => data.password === data.confirmPassword, {
     message: 'Passwords do not match',
     path: ['confirmPassword'],
+  })
+  .refine((data) => !data.state || !data.district || isValidDistrictForState(data.state, data.district), {
+    message: 'Selected District does not belong to the selected State / Union Territory',
+    path: ['district'],
   });
 
 type OfficerRegistrationFormValues = z.infer<typeof officerRegistrationSchema>;
@@ -112,6 +118,8 @@ export function OfficerRegisterPage() {
   const {
     register,
     handleSubmit,
+    setValue,
+    watch,
     formState: { errors },
   } = useForm<OfficerRegistrationFormValues>({
     resolver: zodResolver(officerRegistrationSchema),
@@ -123,8 +131,8 @@ export function OfficerRegisterPage() {
       designation: '',
       departmentName: '',
       organizationType: 'DISTRICT_AUTHORITY',
-      state: 'Maharashtra',
-      district: 'Nagpur',
+      state: '',
+      district: '',
       officeAddress: '',
       requestedRole: 'LAND_ACQUISITION_OFFICER',
       password: '',
@@ -417,34 +425,20 @@ export function OfficerRegisterPage() {
                     </select>
                   </div>
 
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-ink-700">
-                      State <span className="text-rust-600">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      {...register('state')}
-                      placeholder="e.g. Maharashtra"
-                      className="h-9 w-full rounded-md border border-ink-300 bg-paper px-3 text-xs text-ink-900 placeholder:text-ink-400 focus:border-terracotta-500 focus:outline-none focus:ring-1 focus:ring-terracotta-500"
+                  <div className="sm:col-span-2">
+                    <StateDistrictSelector
+                      stateValue={watch('state') || ''}
+                      onStateChange={(val) => {
+                        setValue('state', val, { shouldValidate: true });
+                        setValue('district', '', { shouldValidate: true });
+                      }}
+                      districtValue={watch('district') || ''}
+                      onDistrictChange={(val) => setValue('district', val, { shouldValidate: true })}
+                      stateLabel="State / Union Territory"
+                      districtLabel="District Jurisdiction"
+                      stateError={errors.state?.message}
+                      districtError={errors.district?.message}
                     />
-                    {errors.state && (
-                      <p className="text-[11px] text-rust-600">{errors.state.message}</p>
-                    )}
-                  </div>
-
-                  <div className="space-y-1.5 sm:col-span-2">
-                    <label className="text-xs font-semibold text-ink-700">
-                      District Jurisdiction <span className="text-rust-600">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      {...register('district')}
-                      placeholder="e.g. Nagpur"
-                      className="h-9 w-full rounded-md border border-ink-300 bg-paper px-3 text-xs text-ink-900 placeholder:text-ink-400 focus:border-terracotta-500 focus:outline-none focus:ring-1 focus:ring-terracotta-500"
-                    />
-                    {errors.district && (
-                      <p className="text-[11px] text-rust-600">{errors.district.message}</p>
-                    )}
                   </div>
 
                   <div className="space-y-1.5 sm:col-span-2">

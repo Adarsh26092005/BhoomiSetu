@@ -1,8 +1,11 @@
+import * as React from 'react'
 import { NavLink } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, X } from 'lucide-react'
-import { PRIMARY_NAV, SECONDARY_NAV, ADMIN_NAV } from '@/constants/navigation'
+import { ChevronLeft, ChevronRight, X, MapPin } from 'lucide-react'
+import { PRIMARY_NAV, SECONDARY_NAV, ADMIN_NAV, PIA_PRIMARY_NAV, PIA_SECONDARY_NAV } from '@/constants/navigation'
 import { useUiStore } from '@/store/ui.store'
 import { useAuthStore } from '@/store/auth.store'
+import { approvalService } from '@/services/approval.service'
+import { ROUTES } from '@/constants/routes'
 import { cn } from '@/lib/utils'
 
 export function Sidebar() {
@@ -11,29 +14,47 @@ export function Sidebar() {
     const isMobileNavOpen = useUiStore((state) => state.isMobileNavOpen)
     const setMobileNavOpen = useUiStore((state) => state.setMobileNavOpen)
     const userRole = useAuthStore((state) => state.session?.user?.role)
+    const effectiveScope = useAuthStore((state) => state.effectiveScope)
+    const [pendingCount, setPendingCount] = React.useState<number | null>(null)
 
-    // Administration is visible to Super Admins, Central/State/District Officers, and PIA managers
-    const canViewAdmin = !userRole || [
-        'SUPER_ADMIN',
-        'CENTRAL_OFFICER',
-        'STATE_OFFICER',
-        'DISTRICT_OFFICER',
-        'PROJECT_IMPLEMENTING_AGENCY',
-    ].includes(userRole)
+    const isSuperAdmin = userRole === 'SUPER_ADMIN'
+    const isPia = userRole === 'PROJECT_IMPLEMENTING_AGENCY'
+
+    React.useEffect(() => {
+        if (isSuperAdmin) {
+            approvalService
+                .listApprovalRequests({ status: 'PENDING', limit: 1 })
+                .then((res) => {
+                    setPendingCount(res.total ?? 0)
+                })
+                .catch(() => {})
+        }
+    }, [isSuperAdmin])
+
+    // Filter Admin Nav based on roles
+    const visibleAdminNav = ADMIN_NAV.filter(
+        (item) => !item.roles || (userRole && item.roles.includes(userRole))
+    )
+
+    const primaryItems = isPia ? PIA_PRIMARY_NAV : PRIMARY_NAV
+    const secondaryItems = isPia ? PIA_SECONDARY_NAV : SECONDARY_NAV
+
+    const areaCode = effectiveScope?.administrativeAreaCode || effectiveScope?.areaCode
+    const areaName = effectiveScope?.administrativeAreaName || effectiveScope?.areaName || effectiveScope?.state
 
     const navContent = (
         <div className="flex h-full flex-col justify-between overflow-y-auto px-3 py-4">
             <div className="space-y-6">
-                {/* Administration Group */}
-                {canViewAdmin && (
+                {/* Administration Group - Only for Super Admin & Authorized Officers */}
+                {visibleAdminNav.length > 0 && !isPia && (
                     <div>
                         {!isSidebarCollapsed && (
                             <p className="px-3 mb-2 text-[10px] font-bold uppercase tracking-wider text-ink-400">
-                                Administration & Onboarding
+                                {isSuperAdmin ? 'Jurisdiction Administration' : 'Administrative Directory'}
                             </p>
                         )}
                         <nav className="space-y-1">
-                            {ADMIN_NAV.map((item) => {
+                            {visibleAdminNav.map((item) => {
                                 const Icon = item.icon
                                 return (
                                     <NavLink
@@ -56,10 +77,18 @@ export function Sidebar() {
                                         {!isSidebarCollapsed && (
                                             <span className="flex-1 truncate font-semibold">{item.label}</span>
                                         )}
-                                        {!isSidebarCollapsed && item.badge && (
-                                            <span className="ml-auto rounded bg-amber-100 px-1.5 py-0.2 text-[9px] font-bold text-amber-700">
-                                                {item.badge}
-                                            </span>
+                                        {!isSidebarCollapsed && (
+                                            item.path === ROUTES.piaApprovals && pendingCount !== null ? (
+                                                pendingCount > 0 ? (
+                                                    <span className="ml-auto rounded-full bg-amber-500 text-paper px-2 py-0.5 text-[10px] font-bold">
+                                                        {pendingCount}
+                                                    </span>
+                                                ) : null
+                                            ) : item.badge ? (
+                                                <span className="ml-auto rounded bg-amber-100 px-1.5 py-0.2 text-[9px] font-bold text-amber-700">
+                                                    {item.badge}
+                                                </span>
+                                            ) : null
                                         )}
                                     </NavLink>
                                 )
@@ -72,11 +101,11 @@ export function Sidebar() {
                 <div>
                     {!isSidebarCollapsed && (
                         <p className="px-3 mb-2 text-[10px] font-bold uppercase tracking-wider text-ink-400">
-                            Land Acquisition Lifecycle
+                            {isPia ? 'My Land Acquisitions' : isSuperAdmin ? 'Land Acquisition Oversight' : 'Acquisition Operations'}
                         </p>
                     )}
                     <nav className="space-y-1">
-                        {PRIMARY_NAV.map((item) => {
+                        {primaryItems.map((item) => {
                             const Icon = item.icon
                             return (
                                 <NavLink
@@ -114,11 +143,11 @@ export function Sidebar() {
                 <div>
                     {!isSidebarCollapsed && (
                         <p className="px-3 mb-2 text-[10px] font-bold uppercase tracking-wider text-ink-400">
-                            System & Compliance
+                            {isPia ? 'Account & Alerts' : 'System & Compliance'}
                         </p>
                     )}
                     <nav className="space-y-1">
-                        {SECONDARY_NAV.map((item) => {
+                        {secondaryItems.map((item) => {
                             const Icon = item.icon
                             return (
                                 <NavLink
@@ -152,8 +181,25 @@ export function Sidebar() {
                 </div>
             </div>
 
+            {/* Jurisdiction Badge at bottom of sidebar */}
+            {effectiveScope && !isSidebarCollapsed && (
+                <div className="pt-3 pb-1 border-t border-ink-100">
+                    <div className="rounded-md bg-paper-subtle p-2 text-[10px] border border-ink-200">
+                        <div className="flex items-center gap-1 font-bold text-ink-800 uppercase tracking-wider">
+                            <MapPin className="h-3 w-3 text-terracotta-600" />
+                            <span>Jurisdiction Scope</span>
+                        </div>
+                        <p className="font-semibold text-terracotta-700 truncate mt-0.5">
+                            {effectiveScope.isCentral || effectiveScope.isNational
+                                ? 'National (Republic of India)'
+                                : `${areaName || 'State'} [${areaCode || 'STATE'}]`}
+                        </p>
+                    </div>
+                </div>
+            )}
+
             {/* Desktop Collapse Toggle */}
-            <div className="pt-4 border-t border-ink-100 hidden lg:block">
+            <div className="pt-3 border-t border-ink-100 hidden lg:block">
                 <button
                     type="button"
                     onClick={toggleSidebar}

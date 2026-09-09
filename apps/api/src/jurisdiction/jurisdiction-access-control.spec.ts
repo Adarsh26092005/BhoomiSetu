@@ -1191,5 +1191,440 @@ describe('Jurisdiction-Aware Data Isolation & Access Control (Comprehensive Suit
       );
     });
   });
+
+  // ============================================================================
+  // SECTION 7: COMPANY HQ vs TARGET LAND ACQUISITION JURISDICTION ROUTING & HOLD
+  // ============================================================================
+  describe('7. Company HQ vs Target Land Acquisition Routing & Hold Lifecycle', () => {
+    it('Scenario 37: Mumbai-headquartered company proposing acquisition in Bengaluru routes to Karnataka Super Admin (KA-AREA-01)', async () => {
+      const result = await organizationsService.registerPia({
+        organizationName: 'Larsen & Toubro Ltd (Mumbai HQ)',
+        registrationCode: 'PIA-LT-BLR-2026',
+        adminFullName: 'Liaison Officer L&T',
+        adminEmail: 'liaison.blr@lntecc.com',
+        adminPhone: '+91-9876543220',
+        adminDesignation: 'VP Infrastructure',
+        state: 'Maharashtra',
+        district: 'Mumbai',
+        officeAddress: 'Ballard Estate, Mumbai',
+        adminPassword: 'Password@2026!',
+        // Target land location is in Karnataka
+        targetState: 'Karnataka',
+        targetDistrict: 'Bengaluru',
+        projectName: 'Bengaluru Bypass Expressway Package 1',
+        projectCode: 'EXP-BLR-PKG1',
+        projectPurpose: 'Expressway Construction',
+        landRequirementArea: 250,
+        landRequirementUnit: 'HECTARES',
+        proposedLandDescription: 'Corridor acquisition across Kengeri and Bidadi hoblis',
+      });
+
+      expect(result.organization.isActive).toBe(false);
+      expect(prisma.approvalRequest.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            requestType: ApprovalRequestType.LAND_ACQUISITION_REQUEST,
+            state: 'Karnataka',
+            district: 'Bengaluru',
+            administrativeAreaId: mockAreaKA01.id,
+            assignedApproverId: mockKarnatakaSuperAdmin.id,
+            status: ApprovalRequestStatus.PENDING,
+          }),
+        }),
+      );
+    });
+
+    it('Scenario 38: Same Mumbai company proposing second acquisition in Pune routes to Maharashtra Super Admin (MH-01)', async () => {
+      const result = await organizationsService.registerPia({
+        organizationName: 'Larsen & Toubro Ltd (Mumbai HQ)',
+        registrationCode: 'PIA-LT-PUNE-2026',
+        adminFullName: 'Liaison Officer L&T Pune',
+        adminEmail: 'liaison.pune@lntecc.com',
+        adminPhone: '+91-9876543221',
+        adminDesignation: 'Project Director',
+        state: 'Maharashtra',
+        district: 'Mumbai',
+        officeAddress: 'Ballard Estate, Mumbai',
+        adminPassword: 'Password@2026!',
+        // Target land location is in Pune, Maharashtra
+        targetState: 'Maharashtra',
+        targetDistrict: 'Pune',
+        projectName: 'Pune Ring Road Package 3',
+        projectCode: 'EXP-PUNE-PKG3',
+        projectPurpose: 'Outer Ring Road Link',
+        landRequirementArea: 180,
+        landRequirementUnit: 'HECTARES',
+        proposedLandDescription: 'Linear acquisition corridor in Haveli tehsil',
+      });
+
+      expect(result.organization.isActive).toBe(false);
+      expect(prisma.approvalRequest.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            requestType: ApprovalRequestType.LAND_ACQUISITION_REQUEST,
+            state: 'Maharashtra',
+            district: 'Pune',
+            administrativeAreaId: mockAreaMH01.id,
+            assignedApproverId: mockMH01SuperAdmin.id,
+            status: ApprovalRequestStatus.PENDING,
+          }),
+        }),
+      );
+    });
+
+    it('Scenario 39: Super Admin can place an ApprovalRequest on ON_HOLD status with remarks', async () => {
+      const mockReq = {
+        id: 'req-hold-test-1',
+        requestType: ApprovalRequestType.LAND_ACQUISITION_REQUEST,
+        requesterUserId: 'user-pia-hold-1',
+        organizationId: mockPiaOrgNHAI.id,
+        state: 'Karnataka',
+        district: 'Bengaluru',
+        administrativeAreaId: mockAreaKA01.id,
+        status: ApprovalRequestStatus.PENDING,
+        metadata: { proposedProjectName: 'Bengaluru Expressway' },
+      };
+      prisma.approvalRequest.findUnique.mockResolvedValue(mockReq);
+      prisma.approvalRequest.update.mockResolvedValue({
+        ...mockReq,
+        status: ApprovalRequestStatus.ON_HOLD,
+        rejectionReason: 'Awaiting environmental impact assessment clearance.',
+      });
+
+      const holdResult = await organizationsService.holdApprovalRequest(
+        'req-hold-test-1',
+        { remarks: 'Awaiting environmental impact assessment clearance.' },
+        mockKarnatakaSuperAdmin,
+      );
+
+      expect(holdResult.status).toBe(ApprovalRequestStatus.ON_HOLD);
+      expect(prisma.approvalRequest.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'req-hold-test-1' },
+          data: expect.objectContaining({
+            status: ApprovalRequestStatus.ON_HOLD,
+            metadata: expect.objectContaining({
+              holdRemarks: 'Awaiting environmental impact assessment clearance.',
+            }),
+          }),
+        }),
+      );
+      expect(prisma.auditLog.create).toHaveBeenCalled();
+    });
+
+    it('Scenario 40: Karnataka Super Admin CANNOT approve or hold Maharashtra ApprovalRequest', async () => {
+      const mockReqMH = {
+        id: 'req-mh-cross-test',
+        requestType: ApprovalRequestType.LAND_ACQUISITION_REQUEST,
+        requesterUserId: 'user-pia-mh-1',
+        organizationId: mockPiaOrgDFCCIL.id,
+        state: 'Maharashtra',
+        district: 'Pune',
+        administrativeAreaId: mockAreaMH01.id,
+        status: ApprovalRequestStatus.PENDING,
+      };
+      prisma.approvalRequest.findUnique.mockResolvedValue(mockReqMH);
+
+      await expect(
+        organizationsService.holdApprovalRequest(
+          'req-mh-cross-test',
+          { remarks: 'Cross-state unauthorized action' },
+          mockKarnatakaSuperAdmin,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+
+      await expect(
+        organizationsService.approveApprovalRequest(
+          'req-mh-cross-test',
+          { remarks: 'Cross-state unauthorized approval' },
+          mockKarnatakaSuperAdmin,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  // ============================================================================
+  // SECTION 8: 15 CANONICAL ROLE & JURISDICTION AUTOMATED ACCEPTANCE TESTS
+  // ============================================================================
+  describe('8. Canonical Role & Jurisdiction Automated Acceptance Tests', () => {
+    // 1. Karnataka Super Admin cannot see Maharashtra organizations
+    it('1. Karnataka Super Admin cannot see Maharashtra organizations', async () => {
+      const scope = await jurisdictionService.resolveEffectiveScope(mockKarnatakaSuperAdmin);
+      expect(jurisdictionService.canAccessOrganization(scope, mockMH01OrgPune)).toBe(false);
+      expect(jurisdictionService.canAccessOrganization(scope, mockMH02OrgThane)).toBe(false);
+    });
+
+    // 2. Maharashtra Super Admin cannot see Karnataka organizations
+    it('2. Maharashtra Super Admin cannot see Karnataka organizations', async () => {
+      const scope = await jurisdictionService.resolveEffectiveScope(mockMaharashtraSuperAdmin);
+      expect(jurisdictionService.canAccessOrganization(scope, mockKarnatakaOrg)).toBe(false);
+    });
+
+    // 3. Karnataka Super Admin cannot see Maharashtra users
+    it('3. Karnataka Super Admin cannot see Maharashtra users', async () => {
+      const scope = await jurisdictionService.resolveEffectiveScope(mockKarnatakaSuperAdmin);
+      expect(jurisdictionService.canAccessUser(scope, mockPuneOfficer)).toBe(false);
+      expect(jurisdictionService.canAccessUser(scope, mockThaneOfficer)).toBe(false);
+    });
+
+    // 4. Maharashtra Super Admin cannot see Karnataka users
+    it('4. Maharashtra Super Admin cannot see Karnataka users', async () => {
+      const scope = await jurisdictionService.resolveEffectiveScope(mockMaharashtraSuperAdmin);
+      expect(jurisdictionService.canAccessUser(scope, mockKarnatakaOfficer)).toBe(false);
+    });
+
+    // 5. Karnataka officer registration routes to KA Super Admin
+    it('5. Karnataka officer registration routes to KA Super Admin', async () => {
+      const result = await organizationsService.registerOfficer({
+        fullName: 'Officer Bengaluru',
+        email: 'officer.blr@karnataka.gov.in',
+        phone: '+91-9876543290',
+        employeeId: 'EMP-KA-BLR-001',
+        designation: 'Land Acquisition Officer',
+        departmentName: 'Bengaluru District Collectorate',
+        organizationType: OrganizationType.DISTRICT_AUTHORITY,
+        state: 'Karnataka',
+        district: 'Bengaluru',
+        officeAddress: 'Revenue Complex, KG Road, Bengaluru',
+        requestedRole: UserRole.LAND_ACQUISITION_OFFICER,
+        password: 'Password@2026!',
+      });
+      expect(result.user.isActive).toBe(false);
+      expect(prisma.approvalRequest.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            state: 'Karnataka',
+            district: 'Bengaluru',
+            administrativeAreaId: mockAreaKA01.id,
+            assignedApproverId: mockKarnatakaSuperAdmin.id,
+          }),
+        }),
+      );
+    });
+
+    // 6. Maharashtra officer registration routes to MH Super Admin
+    it('6. Maharashtra officer registration routes to MH Super Admin', async () => {
+      const result = await organizationsService.registerOfficer({
+        fullName: 'Officer Mumbai',
+        email: 'officer.mum@maharashtra.gov.in',
+        phone: '+91-9876543291',
+        employeeId: 'EMP-MH-MUM-001',
+        designation: 'Land Acquisition Officer',
+        departmentName: 'Mumbai Collectorate',
+        organizationType: OrganizationType.DISTRICT_AUTHORITY,
+        state: 'Maharashtra',
+        district: 'Mumbai',
+        officeAddress: 'Old Custom House, Fort, Mumbai',
+        requestedRole: UserRole.LAND_ACQUISITION_OFFICER,
+        password: 'Password@2026!',
+      });
+      expect(result.user.isActive).toBe(false);
+      expect(prisma.approvalRequest.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            state: 'Maharashtra',
+            district: 'Mumbai',
+            administrativeAreaId: mockAreaMH01Demo.id,
+            assignedApproverId: mockMaharashtraSuperAdmin.id,
+          }),
+        }),
+      );
+    });
+
+    // 7. Mumbai-HQ company targeting Bengaluru routes to KA Super Admin
+    it('7. Mumbai-HQ company targeting Bengaluru routes to KA Super Admin', async () => {
+      const result = await organizationsService.registerPia({
+        organizationName: 'Mumbai Infra Corp',
+        registrationCode: 'PIA-MUM-BLR-01',
+        adminFullName: 'Director Mumbai Infra',
+        adminEmail: 'director.blr@mumbaiinfra.com',
+        adminPhone: '+91-9876543292',
+        adminDesignation: 'Director Projects',
+        state: 'Maharashtra',
+        district: 'Mumbai',
+        officeAddress: 'BKC, Mumbai',
+        adminPassword: 'Password@2026!',
+        targetState: 'Karnataka',
+        targetDistrict: 'Bengaluru',
+        projectName: 'Bengaluru Peripheral Link',
+      });
+      expect(prisma.approvalRequest.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            requestType: ApprovalRequestType.LAND_ACQUISITION_REQUEST,
+            state: 'Karnataka',
+            district: 'Bengaluru',
+            administrativeAreaId: mockAreaKA01.id,
+            assignedApproverId: mockKarnatakaSuperAdmin.id,
+          }),
+        }),
+      );
+    });
+
+    // 8. Mumbai-HQ company targeting Pune routes to MH Super Admin
+    it('8. Mumbai-HQ company targeting Pune routes to MH Super Admin', async () => {
+      const result = await organizationsService.registerPia({
+        organizationName: 'Mumbai Infra Corp',
+        registrationCode: 'PIA-MUM-PUNE-01',
+        adminFullName: 'Director Mumbai Infra Pune',
+        adminEmail: 'director.pune@mumbaiinfra.com',
+        adminPhone: '+91-9876543293',
+        adminDesignation: 'Director Projects',
+        state: 'Maharashtra',
+        district: 'Mumbai',
+        officeAddress: 'BKC, Mumbai',
+        adminPassword: 'Password@2026!',
+        targetState: 'Maharashtra',
+        targetDistrict: 'Pune',
+        projectName: 'Pune Metro Link Package 2',
+      });
+      expect(prisma.approvalRequest.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            requestType: ApprovalRequestType.LAND_ACQUISITION_REQUEST,
+            state: 'Maharashtra',
+            district: 'Pune',
+            administrativeAreaId: mockAreaMH01.id,
+            assignedApproverId: mockMH01SuperAdmin.id,
+          }),
+        }),
+      );
+    });
+
+    // 9. Karnataka Super Admin can approve Karnataka request
+    it('9. Karnataka Super Admin can approve Karnataka request', async () => {
+      const mockReqKA = {
+        id: 'req-ka-approve-test',
+        requestType: ApprovalRequestType.LAND_ACQUISITION_REQUEST,
+        requesterUserId: 'user-ka-req',
+        organizationId: mockKarnatakaOrg.id,
+        state: 'Karnataka',
+        district: 'Bengaluru',
+        administrativeAreaId: mockAreaKA01.id,
+        assignedApproverId: mockKarnatakaSuperAdmin.id,
+        status: ApprovalRequestStatus.PENDING,
+      };
+      prisma.approvalRequest.findUnique.mockResolvedValue(mockReqKA);
+      prisma.approvalRequest.update.mockResolvedValue({
+        ...mockReqKA,
+        status: ApprovalRequestStatus.APPROVED,
+      });
+
+      const approved = await organizationsService.approveApprovalRequest(
+        'req-ka-approve-test',
+        { remarks: 'Approved by Karnataka Super Admin' },
+        mockKarnatakaSuperAdmin,
+      );
+      expect(approved.status).toBe(ApprovalRequestStatus.APPROVED);
+    });
+
+    // 10. Karnataka Super Admin gets 403 on Maharashtra request
+    it('10. Karnataka Super Admin gets 403 on Maharashtra request', async () => {
+      const mockReqMH = {
+        id: 'req-mh-reject-test',
+        requestType: ApprovalRequestType.OFFICER_REGISTRATION,
+        requesterUserId: 'user-mh-req',
+        organizationId: mockMH01OrgPune.id,
+        state: 'Maharashtra',
+        district: 'Pune',
+        administrativeAreaId: mockAreaMH01.id,
+        status: ApprovalRequestStatus.PENDING,
+      };
+      prisma.approvalRequest.findUnique.mockResolvedValue(mockReqMH);
+
+      await expect(
+        organizationsService.approveApprovalRequest(
+          'req-mh-reject-test',
+          { remarks: 'Unauthorized' },
+          mockKarnatakaSuperAdmin,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    // 11. Maharashtra Super Admin gets 403 on Karnataka request
+    it('11. Maharashtra Super Admin gets 403 on Karnataka request', async () => {
+      const mockReqKA = {
+        id: 'req-ka-mh-forbidden',
+        requestType: ApprovalRequestType.OFFICER_REGISTRATION,
+        requesterUserId: 'user-ka-req-2',
+        organizationId: mockKarnatakaOrg.id,
+        state: 'Karnataka',
+        district: 'Bengaluru',
+        administrativeAreaId: mockAreaKA01.id,
+        status: ApprovalRequestStatus.PENDING,
+      };
+      prisma.approvalRequest.findUnique.mockResolvedValue(mockReqKA);
+
+      await expect(
+        organizationsService.approveApprovalRequest(
+          'req-ka-mh-forbidden',
+          { remarks: 'Unauthorized cross approval' },
+          mockMaharashtraSuperAdmin,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    // 12. PIA user sees only own organization/data
+    it('12. PIA user sees only own organization/data', async () => {
+      const scope = await jurisdictionService.resolveEffectiveScope(mockNhaiPiaUser);
+      expect(scope.isProjectRestricted).toBe(true);
+      expect(jurisdictionService.canAccessOrganization(scope, mockPiaOrgNHAI)).toBe(true);
+      expect(jurisdictionService.canAccessOrganization(scope, mockPiaOrgDFCCIL)).toBe(false);
+      expect(jurisdictionService.canAccessOrganization(scope, mockMH01OrgPune)).toBe(false);
+    });
+
+    // 13. Approval queue count equals actual scoped PENDING requests
+    it('13. Approval queue count equals actual scoped PENDING requests', async () => {
+      prisma.approvalRequest.count.mockResolvedValue(3);
+      prisma.approvalRequest.findMany.mockResolvedValue([
+        { id: 'req-1', status: ApprovalRequestStatus.PENDING, state: 'Karnataka', district: 'Bengaluru' },
+        { id: 'req-2', status: ApprovalRequestStatus.PENDING, state: 'Karnataka', district: 'Mysuru' },
+        { id: 'req-3', status: ApprovalRequestStatus.PENDING, state: 'Karnataka', district: 'Hampi' },
+      ]);
+
+      const result = await organizationsService.listApprovalRequests(
+        { status: ApprovalRequestStatus.PENDING },
+        mockKarnatakaSuperAdmin,
+      );
+      expect(result.total).toBe(3);
+      expect(result.items.length).toBe(3);
+    });
+
+    // 14. Dashboard KPIs are jurisdiction scoped
+    it('14. Dashboard KPIs are jurisdiction scoped', async () => {
+      const scope = await jurisdictionService.resolveEffectiveScope(mockKarnatakaSuperAdmin);
+      const projectWhere = jurisdictionService.buildProjectWhere(scope);
+      const parcelWhere = jurisdictionService.buildParcelWhere(scope);
+
+      expect(projectWhere).toEqual({
+        AND: [
+          { state: { equals: 'Karnataka', mode: 'insensitive' } },
+          {
+            OR: [
+              { districts: { array_contains: 'Bengaluru' } },
+              { districts: { array_contains: 'Mysuru' } },
+              { districts: { array_contains: 'Hampi' } },
+            ],
+          },
+        ],
+      });
+
+      expect(parcelWhere).toEqual({
+        state: { equals: 'Karnataka', mode: 'insensitive' },
+        district: { in: ['Bengaluru', 'Mysuru', 'Hampi'], mode: 'insensitive' },
+      });
+    });
+
+    // 15. Central Super Admin sees nationwide records
+    it('15. Central Super Admin sees nationwide records', async () => {
+      const scope = await jurisdictionService.resolveEffectiveScope(mockCentralSuperAdmin);
+      expect(scope.isCentral).toBe(true);
+      expect(jurisdictionService.canAccessOrganization(scope, mockKarnatakaOrg)).toBe(true);
+      expect(jurisdictionService.canAccessOrganization(scope, mockMH01OrgPune)).toBe(true);
+      expect(jurisdictionService.canAccessOrganization(scope, mockMH02OrgThane)).toBe(true);
+      expect(jurisdictionService.canAccessUser(scope, mockPuneOfficer)).toBe(true);
+      expect(jurisdictionService.canAccessUser(scope, mockKarnatakaOfficer)).toBe(true);
+    });
+  });
 });
 

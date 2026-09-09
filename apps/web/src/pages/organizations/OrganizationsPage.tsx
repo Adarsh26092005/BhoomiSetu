@@ -276,7 +276,9 @@ export function OrganizationsPage() {
             className="h-9 px-2.5 text-xs rounded-sm border border-ink-300 bg-paper focus:outline-none focus:ring-1 focus:ring-ink-900 font-medium text-ink-700"
           >
             <option value="ALL">All States</option>
+            <option value="Karnataka">Karnataka</option>
             <option value="Maharashtra">Maharashtra</option>
+            <option value="National">National / Central</option>
             <option value="Delhi">Delhi</option>
             <option value="Madhya Pradesh">Madhya Pradesh</option>
             <option value="Gujarat">Gujarat</option>

@@ -125,7 +125,7 @@ export class OrganizationsService {
     };
   }
 
-  async findOne(id: string): Promise<any> {
+  async findOne(id: string, actor?: AuthenticatedUser): Promise<any> {
     const org = await this.prisma.organization.findUnique({
       where: { id },
       include: {
@@ -160,10 +160,38 @@ export class OrganizationsService {
       throw new NotFoundException(`Organization with ID "${id}" not found`);
     }
 
+    if (actor) {
+      const scope = await this.jurisdictionService.resolveEffectiveScope(actor);
+      if (!this.jurisdictionService.canAccessOrganization(scope, org)) {
+        throw new ForbiddenException(
+          'Forbidden: You do not have jurisdictional authority to view this organization',
+        );
+      }
+    }
+
     return this.mapToResponse(org);
   }
 
-  async create(dto: CreateOrganizationDto, actorId?: string): Promise<OrganizationResponseDto> {
+  async create(
+    dto: CreateOrganizationDto,
+    actorId?: string,
+    actor?: AuthenticatedUser,
+  ): Promise<OrganizationResponseDto> {
+    if (actor) {
+      const scope = await this.jurisdictionService.resolveEffectiveScope(actor);
+      if (
+        !this.jurisdictionService.canAccessOrganization(scope, {
+          id: '',
+          state: dto.state,
+          district: dto.district,
+        })
+      ) {
+        throw new ForbiddenException(
+          'Forbidden: You do not have jurisdictional authority to provision organizations in this location',
+        );
+      }
+    }
+
     if (dto.code) {
       const existing = await this.prisma.organization.findUnique({
         where: { code: dto.code },
@@ -304,16 +332,27 @@ export class OrganizationsService {
       }
     }
 
-    // Resolve Area & Approvers
+    // Resolve Target Land Acquisition Jurisdiction vs Company HQ
+    const targetState = (dto.targetState || dto.state || '').trim();
+    const targetDistrict = (dto.targetDistrict || dto.district || undefined)?.trim();
+
+    // Resolve Target Area & Approvers based on ACQUISITION TARGET (not HQ)
     const targetArea = await this.jurisdictionService.findAreaByStateAndDistrict(
-      dto.state || '',
-      dto.district || undefined,
+      targetState,
+      targetDistrict,
     );
     const approverIds = await this.jurisdictionService.findApproversForArea(
       targetArea?.id,
-      dto.state,
-      dto.district,
+      targetState,
+      targetDistrict,
     );
+
+    const isAcquisitionProposal = Boolean(
+      dto.projectName || dto.targetState || dto.targetDistrict || dto.landRequirementArea,
+    );
+    const requestType = isAcquisitionProposal
+      ? ApprovalRequestType.LAND_ACQUISITION_REQUEST
+      : ApprovalRequestType.PIA_REGISTRATION;
 
     const passwordHash = await bcrypt.hash(dto.adminPassword, BCRYPT_SALT_ROUNDS);
 
@@ -329,6 +368,7 @@ export class OrganizationsService {
           isActive: false, // Inactive until approved
           jurisdiction: {
             officeAddress: dto.officeAddress,
+            companyType: dto.companyType || 'CORPORATION',
             metadata: dto.metadata || {},
           },
         },
@@ -353,31 +393,49 @@ export class OrganizationsService {
         },
       });
 
-      // Create explicit ApprovalRequest routed to AdministrativeArea
+      // Create explicit ApprovalRequest routed to Target AdministrativeArea
       const approvalReq = await tx.approvalRequest.create({
         data: {
-          requestType: ApprovalRequestType.PIA_REGISTRATION,
+          requestType,
           requesterUserId: user.id,
           organizationId: org.id,
-          state: dto.state || 'National',
-          district: dto.district || null,
+          state: targetState || 'National',
+          district: targetDistrict || null,
           administrativeAreaId: targetArea?.id || null,
           assignedApproverId: approverIds[0] || null,
           status: ApprovalRequestStatus.PENDING,
           metadata: {
             registrationCode: dto.registrationCode,
             organizationName: dto.organizationName,
+            companyType: dto.companyType || 'CORPORATION',
+            hqState: dto.state || null,
+            hqDistrict: dto.district || null,
             adminFullName: dto.adminFullName,
             adminDesignation: dto.adminDesignation,
             adminEmail: email,
+            adminPhone: dto.adminPhone,
             officeAddress: dto.officeAddress,
+            // Proposed Land Acquisition Request Details
+            projectName: dto.projectName || null,
+            projectCode: dto.projectCode || null,
+            projectPurpose: dto.projectPurpose || null,
+            landRequirementArea: dto.landRequirementArea || null,
+            landRequirementUnit: dto.landRequirementUnit || 'HECTARE',
+            targetState: targetState || null,
+            targetDistrict: targetDistrict || null,
+            proposedLandDescription: dto.proposedLandDescription || null,
+            projectDescription: dto.projectDescription || null,
+            expectedTimelineMonths: dto.expectedTimelineMonths || null,
+            supportingDocuments: dto.supportingDocuments || [],
           },
         },
       });
 
       await tx.auditLog.create({
         data: {
-          action: 'PIA_REGISTRATION_SUBMITTED',
+          action: isAcquisitionProposal
+            ? 'LAND_ACQUISITION_REQUEST_SUBMITTED'
+            : 'PIA_REGISTRATION_SUBMITTED',
           entityType: 'Organization',
           entityId: org.id,
           organizationId: org.id,
@@ -385,6 +443,9 @@ export class OrganizationsService {
             organizationName: org.name,
             adminEmail: user.email,
             status: org.status,
+            requestType,
+            targetState,
+            targetDistrict,
             approvalRequestId: approvalReq.id,
             administrativeAreaId: targetArea?.id,
           },
@@ -395,7 +456,7 @@ export class OrganizationsService {
     });
 
     this.logger.log(
-      `New PIA registration submitted: "${dto.organizationName}" (${email}) - Routed to Area: ${targetArea?.code || 'Central'}`,
+      `New ${requestType} submitted: "${dto.organizationName}" (${email}) - Target Area: ${targetArea?.code || 'Central'} (${targetDistrict || ''}, ${targetState})`,
     );
 
     return {
@@ -755,8 +816,11 @@ export class OrganizationsService {
           },
         });
 
-        // If PIA registration, also activate any primary users
-        if (request.requestType === ApprovalRequestType.PIA_REGISTRATION) {
+        // If PIA or Land Acquisition registration, also activate any primary users
+        if (
+          request.requestType === ApprovalRequestType.PIA_REGISTRATION ||
+          request.requestType === ApprovalRequestType.LAND_ACQUISITION_REQUEST
+        ) {
           await tx.user.updateMany({
             where: { organizationId: request.organizationId },
             data: { isActive: true },
@@ -815,9 +879,12 @@ export class OrganizationsService {
       );
     }
 
-    if (request.status !== ApprovalRequestStatus.PENDING) {
+    if (
+      request.status !== ApprovalRequestStatus.PENDING &&
+      request.status !== ApprovalRequestStatus.ON_HOLD
+    ) {
       throw new BadRequestException(
-        `Only requests in PENDING status can be rejected (current: ${request.status})`,
+        `Only requests in PENDING or ON_HOLD status can be rejected (current: ${request.status})`,
       );
     }
 
@@ -836,7 +903,8 @@ export class OrganizationsService {
       });
 
       if (
-        request.requestType === ApprovalRequestType.PIA_REGISTRATION &&
+        (request.requestType === ApprovalRequestType.PIA_REGISTRATION ||
+          request.requestType === ApprovalRequestType.LAND_ACQUISITION_REQUEST) &&
         request.organizationId
       ) {
         await tx.organization.update({
@@ -870,6 +938,81 @@ export class OrganizationsService {
 
     this.logger.warn(
       `ApprovalRequest "${id}" (${request.requestType}) rejected by ${actor.email}`,
+    );
+
+    return updated;
+  }
+
+  async holdApprovalRequest(
+    id: string,
+    dto: ApprovalDecisionDto,
+    actor: AuthenticatedUser,
+  ) {
+    const request = await this.prisma.approvalRequest.findUnique({
+      where: { id },
+      include: {
+        organization: true,
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException(`Approval request with ID "${id}" not found`);
+    }
+
+    const scope = await this.jurisdictionService.resolveEffectiveScope(actor);
+    if (!this.jurisdictionService.canAccessApprovalRequest(scope, request)) {
+      throw new ForbiddenException(
+        'Forbidden: You do not have jurisdictional authority to modify this request',
+      );
+    }
+
+    if (
+      request.status !== ApprovalRequestStatus.PENDING &&
+      request.status !== ApprovalRequestStatus.ON_HOLD
+    ) {
+      throw new BadRequestException(
+        `Only requests in PENDING status can be placed on hold (current: ${request.status})`,
+      );
+    }
+
+    const holdRemarks = dto.remarks || dto.rejectionReason || 'Placed on hold for administrative review.';
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const updatedReq = await tx.approvalRequest.update({
+        where: { id },
+        data: {
+          status: ApprovalRequestStatus.ON_HOLD,
+          reviewedAt: new Date(),
+          reviewedById: actor.id,
+          metadata: {
+            ...((request.metadata as Record<string, any>) || {}),
+            holdRemarks,
+          },
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          actorId: actor.id,
+          action: 'HOLD_ONBOARDING_REQUEST',
+          entityType: 'ApprovalRequest',
+          entityId: id,
+          organizationId: request.organizationId || null,
+          previousState: { status: request.status },
+          newState: {
+            status: ApprovalRequestStatus.ON_HOLD,
+            requestType: request.requestType,
+            reviewedBy: actor.id,
+            remarks: holdRemarks,
+          },
+        },
+      });
+
+      return updatedReq;
+    });
+
+    this.logger.log(
+      `ApprovalRequest "${id}" (${request.requestType}) placed ON_HOLD by ${actor.email}`,
     );
 
     return updated;

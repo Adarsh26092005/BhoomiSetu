@@ -12,13 +12,27 @@ import { KpiCard } from './KpiCard'
 import type { AcquisitionProject } from '@/types'
 import { formatINR } from '@/lib/format'
 
+import { useAuthStore } from '@/store/auth.store'
+
 interface ExecutiveKpiGridProps {
     projects: AcquisitionProject[]
 }
 
 export function ExecutiveKpiGrid({ projects }: ExecutiveKpiGridProps) {
+    const effectiveScope = useAuthStore((state) => state.effectiveScope)
     // 1. Total Projects
     const totalProjects = projects.length
+
+    const scopeTitle = effectiveScope?.isCentral || effectiveScope?.isNational
+        ? 'National Overview'
+        : effectiveScope?.administrativeAreaName || (effectiveScope?.state ? `${effectiveScope.state} Area Overview` : 'Jurisdiction Overview')
+
+    const projectUnit = effectiveScope?.isCentral ? 'National Schemes' : 'Jurisdiction Schemes'
+    const projectSubtitle = effectiveScope?.isCentral
+        ? 'Spanning Multiple States & Corridors'
+        : effectiveScope?.districts && effectiveScope.districts.length > 0
+          ? `Covering ${effectiveScope.districts.join(', ')}`
+          : `Within ${effectiveScope?.state || 'Jurisdiction'} Area`
 
     // 2. Total Land Proposed (hectares)
     const totalLandProposedHa = projects.reduce((acc, p) => acc + p.totalAreaHectares, 0)
@@ -61,7 +75,7 @@ export function ExecutiveKpiGrid({ projects }: ExecutiveKpiGridProps) {
         <section aria-labelledby="executive-kpis-heading" className="space-y-3">
             <div className="flex items-center justify-between">
                 <h2 id="executive-kpis-heading" className="text-xs font-bold uppercase tracking-wider text-ink-500">
-                    Executive Key Performance Indicators (National Overview)
+                    Executive Key Performance Indicators ({scopeTitle})
                 </h2>
                 <span className="text-[11px] text-ink-400 font-mono">
                     Aggregated across {totalProjects} Projects
@@ -73,8 +87,8 @@ export function ExecutiveKpiGrid({ projects }: ExecutiveKpiGridProps) {
                 <KpiCard
                     title="Total Projects"
                     value={totalProjects}
-                    unit="National Schemes"
-                    subtitle="Spanning 7 States & Corridors"
+                    unit={projectUnit}
+                    subtitle={projectSubtitle}
                     change={{ value: '+2', direction: 'up', period: 'Q3 FY26' }}
                     icon={Landmark}
                     accentColor="ink"

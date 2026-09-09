@@ -80,6 +80,16 @@ export interface PiaRegistrationInput {
   adminPhone?: string;
   adminDesignation: string;
   adminPassword: string;
+  projectName?: string;
+  projectCode?: string;
+  projectPurpose?: string;
+  landRequirementArea?: number;
+  landRequirementUnit?: string;
+  targetState?: string;
+  targetDistrict?: string;
+  proposedLandDescription?: string;
+  projectDescription?: string;
+  expectedTimelineMonths?: number;
 }
 
 export interface OfficerRegistrationInput {

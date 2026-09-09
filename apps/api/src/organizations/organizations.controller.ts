@@ -119,8 +119,11 @@ export class OrganizationsController {
     status: 404,
     description: 'Organization not found.',
   })
-  async findOne(@Param('id') id: string) {
-    return this.organizationsService.findOne(id);
+  async findOne(
+    @Param('id') id: string,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
+    return this.organizationsService.findOne(id, user);
   }
 
   @Post()
@@ -142,9 +145,9 @@ export class OrganizationsController {
   })
   async create(
     @Body() dto: CreateOrganizationDto,
-    @CurrentUser('id') actorId: string,
+    @CurrentUser() user: AuthenticatedUser,
   ): Promise<OrganizationResponseDto> {
-    return this.organizationsService.create(dto, actorId);
+    return this.organizationsService.create(dto, user?.id, user);
   }
 
   @Patch(':id')

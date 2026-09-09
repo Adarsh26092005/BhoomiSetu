@@ -118,6 +118,8 @@ function projectCodeOf(projectId: string): string {
     return MOCK_PROJECTS.find((p) => p.id === projectId)?.code ?? projectId
 }
 
+import { useAuthStore } from '@/store/auth.store'
+
 interface AnalyticsScope {
     projects: AcquisitionProject[]
     parcels: LandParcel[]
@@ -131,8 +133,29 @@ interface AnalyticsScope {
 
 function getScope(filters?: Partial<AnalyticsFilterState>): AnalyticsScope {
     const period = filters?.period
+    const userScope = useAuthStore.getState().effectiveScope
 
     let projects = MOCK_PROJECTS.filter((p) => {
+        // Enforce user jurisdiction boundaries
+        if (userScope && !userScope.isCentral) {
+            if (userScope.state && p.state && p.state.toLowerCase() !== userScope.state.toLowerCase()) {
+                return false
+            }
+            if (userScope.districts && userScope.districts.length > 0) {
+                const hasDistrict = p.districts.some((d) =>
+                    userScope.districts.some((ud) => ud.toLowerCase() === d.toLowerCase()),
+                )
+                if (!hasDistrict) {
+                    return false
+                }
+            }
+            if (userScope.isProjectRestricted) {
+                if (userScope.organizationId && p.implementingAgencyOrgId !== userScope.organizationId) {
+                    return false
+                }
+            }
+        }
+
         if (filters?.projectId && filters.projectId !== 'ALL' && p.id !== filters.projectId) return false
         if (filters?.state && filters.state !== 'ALL' && p.state !== filters.state) return false
         if (filters?.district && filters.district !== 'ALL' && !p.districts.includes(filters.district)) return false

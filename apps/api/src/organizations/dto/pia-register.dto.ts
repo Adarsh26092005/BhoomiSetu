@@ -64,6 +64,70 @@ export class PiaRegisterDto {
   @MaxLength(100)
   adminDesignation!: string;
 
+  @ApiPropertyOptional({ example: 'PRIVATE_LTD', description: 'Company incorporation type' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  companyType?: string;
+
+  // Proposed Land Acquisition Request (Target Location & Project Scope)
+  @ApiPropertyOptional({ example: 'Bengaluru Outer Ring Road Phase 2', description: 'Name of the proposed acquisition project' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  projectName?: string;
+
+  @ApiPropertyOptional({ example: 'KA-BLR-ORR-2026', description: 'Proposed project reference code' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  projectCode?: string;
+
+  @ApiPropertyOptional({ example: 'HIGHWAY', description: 'Proposed project purpose or category' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  projectPurpose?: string;
+
+  @ApiPropertyOptional({ example: 250.5, description: 'Required land area' })
+  @IsOptional()
+  landRequirementArea?: number;
+
+  @ApiPropertyOptional({ example: 'HECTARE', enum: ['HECTARE', 'ACRE'], description: 'Unit of land requirement' })
+  @IsOptional()
+  @IsString()
+  landRequirementUnit?: string;
+
+  @ApiPropertyOptional({ example: 'Karnataka', description: 'State where land acquisition is targeted' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  targetState?: string;
+
+  @ApiPropertyOptional({ example: 'Bengaluru', description: 'District where land acquisition is targeted' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  targetDistrict?: string;
+
+  @ApiPropertyOptional({ description: 'Description of targeted land parcels, tehsils, or survey numbers' })
+  @IsOptional()
+  @IsString()
+  proposedLandDescription?: string;
+
+  @ApiPropertyOptional({ description: 'Detailed description of the proposed development project' })
+  @IsOptional()
+  @IsString()
+  projectDescription?: string;
+
+  @ApiPropertyOptional({ example: 36, description: 'Expected execution timeline in months' })
+  @IsOptional()
+  expectedTimelineMonths?: number;
+
+  @ApiPropertyOptional({ description: 'List or references of uploaded DPR/statutory approval documents' })
+  @IsOptional()
+  supportingDocuments?: any[];
+
   @ApiPropertyOptional({ description: 'Additional statutory authorization metadata or DPR reference notes' })
   @IsOptional()
   metadata?: Record<string, any>;

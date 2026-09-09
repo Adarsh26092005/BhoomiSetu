@@ -18,66 +18,92 @@ import {
     MOCK_CORRIDORS_GEOJSON,
 } from '@/mock/gis'
 
+import { useAuthStore } from '@/store/auth.store'
+
 class GisService {
     async getLayers(): Promise<GisLayer[]> {
         return Promise.resolve([...MOCK_GIS_LAYERS])
     }
 
     async getProjectsGeoJson(): Promise<GeoJsonFeatureCollection<GisProjectProperties>> {
-        return Promise.resolve(MOCK_PROJECTS_GEOJSON)
+        const userScope = useAuthStore.getState().effectiveScope
+        if (!userScope || userScope.isCentral) {
+            return Promise.resolve(MOCK_PROJECTS_GEOJSON)
+        }
+        const filtered = MOCK_PROJECTS_GEOJSON.features.filter((f) => {
+            const p = f.properties
+            if (userScope.state && p.state && p.state.toLowerCase() !== userScope.state.toLowerCase()) {
+                return false
+            }
+            if (userScope.districts && userScope.districts.length > 0 && p.districts && p.districts.length > 0) {
+                if (!p.districts.some((d) => userScope.districts.some((ud) => ud.toLowerCase() === d.toLowerCase()))) {
+                    return false
+                }
+            }
+            return true
+        })
+        return Promise.resolve({ ...MOCK_PROJECTS_GEOJSON, features: filtered })
     }
 
     async getParcelsGeoJson(
         filters?: Partial<GisFilterState>,
     ): Promise<GeoJsonFeatureCollection<GisParcelProperties>> {
-        if (!filters) {
-            return Promise.resolve(MOCK_PARCELS_GEOJSON)
-        }
+        const userScope = useAuthStore.getState().effectiveScope
 
         const filteredFeatures = MOCK_PARCELS_GEOJSON.features.filter((f) => {
             const p = f.properties
 
-            if (filters.projectId && filters.projectId !== 'ALL' && p.projectId !== filters.projectId) {
-                return false
-            }
-            if (filters.state && filters.state !== 'ALL' && p.state !== filters.state) {
-                return false
-            }
-            if (filters.district && filters.district !== 'ALL' && p.district !== filters.district) {
-                return false
-            }
-            if (filters.village && filters.village !== 'ALL' && p.village !== filters.village) {
-                return false
-            }
-            if (filters.parcelStatus && filters.parcelStatus !== 'ALL' && p.parcelStatus !== filters.parcelStatus) {
-                return false
-            }
-            if (filters.landType && filters.landType !== 'ALL' && p.landType !== filters.landType) {
-                return false
-            }
-            if (filters.compensationStatus && filters.compensationStatus !== 'ALL' && p.compensationStatus !== filters.compensationStatus) {
-                return false
-            }
-            if (filters.possessionStatus && filters.possessionStatus !== 'ALL' && p.possessionStatus !== filters.possessionStatus) {
-                return false
-            }
-            if (filters.randrStatus && filters.randrStatus !== 'ALL' && p.randrStatus !== filters.randrStatus) {
-                return false
-            }
-            if (filters.disputedOnly && !p.isDisputed) {
-                return false
-            }
-            if (filters.search) {
-                const q = filters.search.toLowerCase()
-                const matchId = p.parcelId.toLowerCase().includes(q)
-                const matchSurvey = p.surveyNumber.toLowerCase().includes(q)
-                const matchKhasra = p.khasraNumber?.toLowerCase().includes(q)
-                const matchVillage = p.village.toLowerCase().includes(q)
-                const matchDistrict = p.district.toLowerCase().includes(q)
-                const matchProject = p.projectName.toLowerCase().includes(q) || p.projectCode.toLowerCase().includes(q)
-
-                if (!matchId && !matchSurvey && !matchKhasra && !matchVillage && !matchDistrict && !matchProject) {
+            if (userScope && !userScope.isCentral) {
+                if (userScope.state && p.state && p.state.toLowerCase() !== userScope.state.toLowerCase()) {
                     return false
+                }
+                if (userScope.districts && userScope.districts.length > 0 && p.district) {
+                    if (!userScope.districts.some((d) => d.toLowerCase() === p.district.toLowerCase())) {
+                        return false
+                    }
+                }
+            }
+
+            if (filters) {
+                if (filters.projectId && filters.projectId !== 'ALL' && p.projectId !== filters.projectId) {
+                    return false
+                }
+                if (filters.state && filters.state !== 'ALL' && p.state !== filters.state) {
+                    return false
+                }
+                if (filters.district && filters.district !== 'ALL' && p.district !== filters.district) {
+                    return false
+                }
+                if (filters.village && filters.village !== 'ALL' && p.village !== filters.village) {
+                    return false
+                }
+                if (filters.parcelStatus && filters.parcelStatus !== 'ALL' && p.parcelStatus !== filters.parcelStatus) {
+                    return false
+                }
+                if (filters.landType && filters.landType !== 'ALL' && p.landType !== filters.landType) {
+                    return false
+                }
+                if (filters.possessionStatus && filters.possessionStatus !== 'ALL' && p.possessionStatus !== filters.possessionStatus) {
+                    return false
+                }
+                if (filters.randrStatus && filters.randrStatus !== 'ALL' && p.randrStatus !== filters.randrStatus) {
+                    return false
+                }
+                if (filters.disputedOnly && !p.isDisputed) {
+                    return false
+                }
+                if (filters.search) {
+                    const q = filters.search.toLowerCase()
+                    const matchId = p.parcelId.toLowerCase().includes(q)
+                    const matchSurvey = p.surveyNumber.toLowerCase().includes(q)
+                    const matchKhasra = p.khasraNumber?.toLowerCase().includes(q)
+                    const matchVillage = p.village.toLowerCase().includes(q)
+                    const matchDistrict = p.district.toLowerCase().includes(q)
+                    const matchProject = p.projectName.toLowerCase().includes(q) || p.projectCode.toLowerCase().includes(q)
+
+                    if (!matchId && !matchSurvey && !matchKhasra && !matchVillage && !matchDistrict && !matchProject) {
+                        return false
+                    }
                 }
             }
             return true
@@ -90,17 +116,41 @@ class GisService {
     }
 
     async getAdministrativeBoundaries(): Promise<GeoJsonFeatureCollection<GisAdministrativeProperties>> {
-        return Promise.resolve(MOCK_ADMINISTRATIVE_GEOJSON)
+        const userScope = useAuthStore.getState().effectiveScope
+        if (!userScope || userScope.isCentral) {
+            return Promise.resolve(MOCK_ADMINISTRATIVE_GEOJSON)
+        }
+        const filtered = MOCK_ADMINISTRATIVE_GEOJSON.features.filter((f) => {
+            const p = f.properties
+            if (userScope.state && p.state && p.state.toLowerCase() !== userScope.state.toLowerCase()) {
+                return false
+            }
+            if (userScope.districts && userScope.districts.length > 0 && p.district) {
+                if (!userScope.districts.some((d) => d.toLowerCase() === p.district!.toLowerCase())) {
+                    return false
+                }
+            }
+            return true
+        })
+        return Promise.resolve({ ...MOCK_ADMINISTRATIVE_GEOJSON, features: filtered })
     }
 
     async getCorridors(): Promise<GeoJsonFeatureCollection<GisCorridorProperties>> {
-        return Promise.resolve(MOCK_CORRIDORS_GEOJSON)
+        const userScope = useAuthStore.getState().effectiveScope
+        if (!userScope || userScope.isCentral) {
+            return Promise.resolve(MOCK_CORRIDORS_GEOJSON)
+        }
+        const projectsCollection = await this.getProjectsGeoJson()
+        const projectIds = new Set(projectsCollection.features.map((f) => f.properties.projectId))
+        const filtered = MOCK_CORRIDORS_GEOJSON.features.filter((f) => projectIds.has(f.properties.projectId))
+        return Promise.resolve({ ...MOCK_CORRIDORS_GEOJSON, features: filtered })
     }
 
     async getSpatialSummary(filters?: Partial<GisFilterState>): Promise<GisKpiMetrics> {
         const parcelsCollection = await this.getParcelsGeoJson(filters)
         const parcels = parcelsCollection.features.map((f) => f.properties)
-        const projects = MOCK_PROJECTS_GEOJSON.features.map((f) => f.properties)
+        const projectsCollection = await this.getProjectsGeoJson()
+        const projects = projectsCollection.features.map((f) => f.properties)
 
         const filteredProjects = filters?.projectId && filters.projectId !== 'ALL'
             ? projects.filter((p) => p.projectId === filters.projectId)
@@ -140,6 +190,10 @@ class GisService {
     }
 
     async getSpatialAttention(): Promise<SpatialAttentionItem[]> {
+        const userScope = useAuthStore.getState().effectiveScope
+        const projectsCollection = await this.getProjectsGeoJson()
+        const allowedProjectIds = new Set(projectsCollection.features.map((f) => f.properties.projectId))
+
         const items: SpatialAttentionItem[] = [
             {
                 id: 'att-1',
@@ -207,10 +261,14 @@ class GisService {
                 centerCoordinates: [79.9065, 13.1428],
             },
         ]
-        return Promise.resolve(items)
+        if (!userScope || userScope.isCentral) {
+            return Promise.resolve(items)
+        }
+        return Promise.resolve(items.filter((item) => item.projectId ? allowedProjectIds.has(item.projectId) : false))
     }
 
     async getDistrictSummaries(): Promise<GisDistrictSummary[]> {
+        const userScope = useAuthStore.getState().effectiveScope
         const summaries: GisDistrictSummary[] = [
             {
                 district: 'Kolar',
@@ -290,7 +348,20 @@ class GisService {
                 compensationPendingInr: 0,
             },
         ]
-        return Promise.resolve(summaries)
+        if (!userScope || userScope.isCentral) {
+            return Promise.resolve(summaries)
+        }
+        return Promise.resolve(
+            summaries.filter((s) => {
+                if (userScope.state && s.state.toLowerCase() !== userScope.state.toLowerCase()) {
+                    return false
+                }
+                if (userScope.districts && userScope.districts.length > 0) {
+                    return userScope.districts.some((d) => d.toLowerCase() === s.district.toLowerCase())
+                }
+                return true
+            }),
+        )
     }
 
     async searchFeatures(query: string) {
