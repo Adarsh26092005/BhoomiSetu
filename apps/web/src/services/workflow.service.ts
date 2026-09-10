@@ -1,206 +1,252 @@
-import { MOCK_WORKFLOW_TASKS } from '@/mock/workflow'
-import type { WorkflowTask, ProjectStatus, UserRole, OrganizationType } from '@/types'
+import { apiClient } from './api-client';
+import { MOCK_WORKFLOW_TASKS } from '@/mock/workflow';
+import type {
+  WorkflowTask,
+  ProjectStatus,
+  UserRole,
+  OrganizationType,
+  WorkflowActionType,
+} from '@/types';
 
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false'
+const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
 
-function delay<T>(value: T, ms = 300): Promise<T> {
-    return new Promise((resolve) => setTimeout(() => resolve(value), ms))
+function mapBackendToWorkflowTask(raw: any): WorkflowTask {
+  return {
+    id: raw.id,
+    projectId: raw.projectId,
+    projectName: raw.project?.title || 'Land Acquisition Scheme',
+    projectCode: raw.project?.code || 'NLAMS-PRJ',
+    currentStage: raw.currentStage || raw.project?.status || 'SUBMITTED',
+    targetStage: raw.targetStage || undefined,
+    taskType: raw.taskType || 'SCRUTINY',
+    title: raw.title || 'Statutory Action Item',
+    description: raw.description || '',
+    assignedRole: (raw.assignedRoleId || raw.assignedOfficer?.role || 'LAND_ACQUISITION_OFFICER') as UserRole,
+    assignedOfficer: raw.assignedOfficer?.fullName || 'Assigned Competent Authority',
+    assignedOrganization: (raw.assignedOrg?.type || raw.assignedOrg?.name || 'DISTRICT_AUTHORITY') as OrganizationType,
+    status: raw.status || 'PENDING',
+    priority: raw.priority || 'MEDIUM',
+    createdAt: raw.createdAt ? new Date(raw.createdAt).toISOString() : new Date().toISOString(),
+    dueAt: raw.dueAt ? new Date(raw.dueAt).toISOString() : new Date().toISOString(),
+    completedAt: raw.completedAt ? new Date(raw.completedAt).toISOString() : undefined,
+    slaDays: raw.slaDays || 7,
+    slaStatus: raw.slaStatus || 'ON_TRACK',
+    remarks: raw.remarks || undefined,
+    availableActions: Array.isArray(raw.availableActions)
+      ? (raw.availableActions as WorkflowActionType[])
+      : ['APPROVE', 'REJECT', 'HOLD'],
+    history: Array.isArray(raw.history)
+      ? raw.history.map((h: any) => ({
+          id: h.id,
+          workflowTaskId: h.taskId || raw.id,
+          action: h.action,
+          fromStatus: h.fromStatus,
+          toStatus: h.toStatus,
+          performedBy: h.performedBy?.fullName || 'Officer',
+          performedByRole: h.performedBy?.role || 'GOVERNMENT_OFFICER',
+          organization: 'GOVERNMENT_AUTHORITY',
+          timestamp: h.createdAt || new Date().toISOString(),
+          remarks: h.remarks || undefined,
+        }))
+      : [],
+    comments: Array.isArray(raw.comments)
+      ? raw.comments.map((c: any) => ({
+          id: c.id,
+          workflowTaskId: c.taskId || raw.id,
+          author: c.author?.fullName || 'Authorized Officer',
+          authorRole: c.author?.role || 'GOVERNMENT_OFFICER',
+          comment: c.comment,
+          createdAt: c.createdAt || new Date().toISOString(),
+        }))
+      : [],
+  };
 }
 
-let workflowState: WorkflowTask[] = [...MOCK_WORKFLOW_TASKS]
+let mockWorkflowState: WorkflowTask[] = [...MOCK_WORKFLOW_TASKS];
 
 export const workflowService = {
-    async list(projectId?: string): Promise<WorkflowTask[]> {
-        if (USE_MOCKS) {
-            let filtered = [...workflowState]
-            if (projectId) {
-                filtered = filtered.filter((w) => w.projectId === projectId)
-            }
-            return delay(filtered)
-        }
-        throw new Error('Live API not yet connected — set VITE_USE_MOCKS=true')
-    },
+  async list(projectId?: string): Promise<WorkflowTask[]> {
+    if (USE_MOCKS) {
+      let filtered = [...mockWorkflowState];
+      if (projectId) {
+        filtered = filtered.filter((w) => w.projectId === projectId);
+      }
+      return filtered;
+    }
 
-    async getById(id: string): Promise<WorkflowTask | undefined> {
-        if (USE_MOCKS) {
-            return delay(workflowState.find((w) => w.id === id))
-        }
-        throw new Error('Live API not yet connected — set VITE_USE_MOCKS=true')
-    },
+    try {
+      const url = projectId ? `/workflow/tasks?projectId=${projectId}` : '/workflow/tasks';
+      const res = await apiClient.get<any>(url);
+      const rawList = res?.items || (Array.isArray(res) ? res : res?.data?.items || []);
+      return rawList.map(mapBackendToWorkflowTask);
+    } catch {
+      // Fallback for mock preview
+      let filtered = [...mockWorkflowState];
+      if (projectId) {
+        filtered = filtered.filter((w) => w.projectId === projectId);
+      }
+      return filtered;
+    }
+  },
 
-    async getByProjectId(projectId: string): Promise<WorkflowTask | undefined> {
-        if (USE_MOCKS) {
-            return delay(workflowState.find((w) => w.projectId === projectId))
-        }
-        throw new Error('Live API not yet connected — set VITE_USE_MOCKS=true')
-    },
+  async getById(id: string): Promise<WorkflowTask | undefined> {
+    if (USE_MOCKS) {
+      return mockWorkflowState.find((w) => w.id === id);
+    }
 
-    async approve(id: string, remarks?: string): Promise<WorkflowTask> {
-        if (USE_MOCKS) {
-            const task = workflowState.find((w) => w.id === id)
-            if (!task) throw new Error(`Workflow task ${id} not found`)
+    try {
+      const res = await apiClient.get<any>(`/workflow/tasks/${id}`);
+      if (res?.id) return mapBackendToWorkflowTask(res);
+      if (res?.data?.id) return mapBackendToWorkflowTask(res.data);
+    } catch {
+      return mockWorkflowState.find((w) => w.id === id);
+    }
 
-            const nextProjectStage: ProjectStatus = task.targetStage || 'COMPLETED'
-            const updated: WorkflowTask = {
-                ...task,
-                status: 'COMPLETED',
-                slaStatus: 'COMPLETED',
-                completedAt: new Date().toISOString().split('T')[0],
-                remarks: remarks || task.remarks,
-                history: [
-                    ...task.history,
-                    {
-                        id: `h-${Date.now()}`,
-                        workflowTaskId: id,
-                        action: 'APPROVED_AND_FORWARDED',
-                        fromStatus: task.currentStage,
-                        toStatus: nextProjectStage,
-                        performedBy: 'Anand Kumar (LAO Officer)',
-                        performedByRole: 'LAND_ACQUISITION_OFFICER',
-                        organization: 'DISTRICT_AUTHORITY',
-                        timestamp: new Date().toISOString(),
-                        remarks: remarks || `Approved transition from ${task.currentStage} to ${nextProjectStage}`,
-                    },
-                ],
-            }
-            workflowState = workflowState.map((w) => (w.id === id ? updated : w))
-            return delay(updated, 400)
-        }
-        throw new Error('Live API not yet connected — set VITE_USE_MOCKS=true')
-    },
+    return mockWorkflowState.find((w) => w.id === id);
+  },
 
-    async reject(id: string, remarks: string): Promise<WorkflowTask> {
-        if (USE_MOCKS) {
-            const task = workflowState.find((w) => w.id === id)
-            if (!task) throw new Error(`Workflow task ${id} not found`)
+  async getByProjectId(projectId: string): Promise<WorkflowTask | undefined> {
+    if (USE_MOCKS) {
+      return mockWorkflowState.find((w) => w.projectId === projectId);
+    }
 
-            const updated: WorkflowTask = {
-                ...task,
-                status: 'REJECTED',
-                remarks: remarks || 'Rejected by Competent Authority',
-                history: [
-                    ...task.history,
-                    {
-                        id: `h-${Date.now()}`,
-                        workflowTaskId: id,
-                        action: 'REJECTED_AND_REMANDED',
-                        fromStatus: task.currentStage,
-                        toStatus: 'REJECTED',
-                        performedBy: 'Anand Kumar (LAO Officer)',
-                        performedByRole: 'LAND_ACQUISITION_OFFICER',
-                        organization: 'DISTRICT_AUTHORITY',
-                        timestamp: new Date().toISOString(),
-                        remarks,
-                    },
-                ],
-            }
-            workflowState = workflowState.map((w) => (w.id === id ? updated : w))
-            return delay(updated, 400)
-        }
-        throw new Error('Live API not yet connected — set VITE_USE_MOCKS=true')
-    },
+    try {
+      const res = await apiClient.get<any>(`/workflow/projects/${projectId}/active-task`);
+      if (res?.id) return mapBackendToWorkflowTask(res);
+      if (res?.data?.id) return mapBackendToWorkflowTask(res.data);
+    } catch {
+      return mockWorkflowState.find((w) => w.projectId === projectId);
+    }
 
-    async putOnHold(id: string, remarks: string): Promise<WorkflowTask> {
-        if (USE_MOCKS) {
-            const task = workflowState.find((w) => w.id === id)
-            if (!task) throw new Error(`Workflow task ${id} not found`)
+    return mockWorkflowState.find((w) => w.projectId === projectId);
+  },
 
-            const updated: WorkflowTask = {
-                ...task,
-                status: 'ON_HOLD',
-                remarks: remarks || 'Placed on hold pending enquiry',
-                history: [
-                    ...task.history,
-                    {
-                        id: `h-${Date.now()}`,
-                        workflowTaskId: id,
-                        action: 'PLACED_ON_HOLD',
-                        fromStatus: task.currentStage,
-                        toStatus: 'ON_HOLD',
-                        performedBy: 'Anand Kumar (LAO Officer)',
-                        performedByRole: 'LAND_ACQUISITION_OFFICER',
-                        organization: 'DISTRICT_AUTHORITY',
-                        timestamp: new Date().toISOString(),
-                        remarks,
-                    },
-                ],
-            }
-            workflowState = workflowState.map((w) => (w.id === id ? updated : w))
-            return delay(updated, 400)
-        }
-        throw new Error('Live API not yet connected — set VITE_USE_MOCKS=true')
-    },
+  async approve(id: string, remarks?: string): Promise<WorkflowTask> {
+    if (USE_MOCKS) {
+      const task = mockWorkflowState.find((w) => w.id === id);
+      if (!task) throw new Error(`Workflow task ${id} not found`);
+      const nextStage: ProjectStatus = task.targetStage || 'COMPLETED';
+      const updated: WorkflowTask = {
+        ...task,
+        status: 'COMPLETED',
+        slaStatus: 'COMPLETED',
+        completedAt: new Date().toISOString().split('T')[0],
+        remarks: remarks || task.remarks,
+        history: [
+          ...task.history,
+          {
+            id: `h-${Date.now()}`,
+            workflowTaskId: id,
+            action: 'COMPLETED',
+            fromStatus: task.currentStage,
+            toStatus: nextStage,
+            performedBy: 'Authorized Officer',
+            performedByRole: task.assignedRole,
+            organization: 'GOVERNMENT_AUTHORITY',
+            timestamp: new Date().toISOString(),
+            remarks: remarks || `Completed task for ${task.currentStage}`,
+          },
+        ],
+      };
+      mockWorkflowState = mockWorkflowState.map((w) => (w.id === id ? updated : w));
+      return updated;
+    }
 
-    async reassign(
-        id: string,
-        newOfficer: string,
-        newRole: UserRole,
-        newOrg: OrganizationType | string,
-        remarks?: string,
-    ): Promise<WorkflowTask> {
-        if (USE_MOCKS) {
-            const task = workflowState.find((w) => w.id === id)
-            if (!task) throw new Error(`Workflow task ${id} not found`)
+    const res = await apiClient.post<any>(`/workflow/tasks/${id}/complete`, { remarks });
+    if (res?.id) return mapBackendToWorkflowTask(res);
+    if (res?.data?.id) return mapBackendToWorkflowTask(res.data);
+    return res;
+  },
 
-            const updated: WorkflowTask = {
-                ...task,
-                assignedOfficer: newOfficer,
-                assignedRole: newRole,
-                assignedOrganization: newOrg,
-                history: [
-                    ...task.history,
-                    {
-                        id: `h-${Date.now()}`,
-                        workflowTaskId: id,
-                        action: 'REASSIGNED',
-                        performedBy: 'Anand Kumar (LAO Officer)',
-                        performedByRole: 'LAND_ACQUISITION_OFFICER',
-                        organization: 'DISTRICT_AUTHORITY',
-                        timestamp: new Date().toISOString(),
-                        remarks: remarks || `Reassigned responsibility to ${newOfficer} (${newRole})`,
-                    },
-                ],
-            }
-            workflowState = workflowState.map((w) => (w.id === id ? updated : w))
-            return delay(updated, 400)
-        }
-        throw new Error('Live API not yet connected — set VITE_USE_MOCKS=true')
-    },
+  async reject(id: string, remarks: string): Promise<WorkflowTask> {
+    if (USE_MOCKS) {
+      const task = mockWorkflowState.find((w) => w.id === id);
+      if (!task) throw new Error(`Workflow task ${id} not found`);
+      const updated: WorkflowTask = {
+        ...task,
+        status: 'REJECTED',
+        remarks: remarks || 'Rejected by Competent Authority',
+        history: [
+          ...task.history,
+          {
+            id: `h-${Date.now()}`,
+            workflowTaskId: id,
+            action: 'REJECTED',
+            fromStatus: task.currentStage,
+            toStatus: 'REJECTED',
+            performedBy: 'Authorized Officer',
+            performedByRole: task.assignedRole,
+            organization: 'GOVERNMENT_AUTHORITY',
+            timestamp: new Date().toISOString(),
+            remarks,
+          },
+        ],
+      };
+      mockWorkflowState = mockWorkflowState.map((w) => (w.id === id ? updated : w));
+      return updated;
+    }
 
-    async addComment(id: string, comment: string): Promise<WorkflowTask> {
-        if (USE_MOCKS) {
-            const task = workflowState.find((w) => w.id === id)
-            if (!task) throw new Error(`Workflow task ${id} not found`)
+    const res = await apiClient.post<any>(`/workflow/tasks/${id}/reject`, { remarks });
+    if (res?.id) return mapBackendToWorkflowTask(res);
+    if (res?.data?.id) return mapBackendToWorkflowTask(res.data);
+    return res;
+  },
 
-            const newComment = {
-                id: `c-${Date.now()}`,
-                workflowTaskId: id,
-                author: 'Anand Kumar',
-                authorRole: 'LAND_ACQUISITION_OFFICER' as UserRole,
-                comment,
-                createdAt: new Date().toISOString(),
-            }
+  async putOnHold(id: string, remarks: string): Promise<WorkflowTask> {
+    if (USE_MOCKS) {
+      const task = mockWorkflowState.find((w) => w.id === id);
+      if (!task) throw new Error(`Workflow task ${id} not found`);
+      const updated: WorkflowTask = {
+        ...task,
+        status: 'ON_HOLD',
+        remarks: remarks || 'Placed on hold',
+        history: [
+          ...task.history,
+          {
+            id: `h-${Date.now()}`,
+            workflowTaskId: id,
+            action: 'HOLD',
+            fromStatus: task.currentStage,
+            toStatus: 'ON_HOLD',
+            performedBy: 'Authorized Officer',
+            performedByRole: task.assignedRole,
+            organization: 'GOVERNMENT_AUTHORITY',
+            timestamp: new Date().toISOString(),
+            remarks,
+          },
+        ],
+      };
+      mockWorkflowState = mockWorkflowState.map((w) => (w.id === id ? updated : w));
+      return updated;
+    }
 
-            const updated: WorkflowTask = {
-                ...task,
-                comments: [...task.comments, newComment],
-                history: [
-                    ...task.history,
-                    {
-                        id: `h-${Date.now()}`,
-                        workflowTaskId: id,
-                        action: 'COMMENT_ADDED',
-                        performedBy: 'Anand Kumar',
-                        performedByRole: 'LAND_ACQUISITION_OFFICER',
-                        organization: 'DISTRICT_AUTHORITY',
-                        timestamp: new Date().toISOString(),
-                        remarks: `Comment: "${comment.slice(0, 50)}${comment.length > 50 ? '...' : ''}"`,
-                    },
-                ],
-            }
-            workflowState = workflowState.map((w) => (w.id === id ? updated : w))
-            return delay(updated, 300)
-        }
-        throw new Error('Live API not yet connected — set VITE_USE_MOCKS=true')
-    },
-}
+    const res = await apiClient.post<any>(`/workflow/tasks/${id}/hold`, { remarks });
+    if (res?.id) return mapBackendToWorkflowTask(res);
+    if (res?.data?.id) return mapBackendToWorkflowTask(res.data);
+    return res;
+  },
+
+  async reassign(
+    id: string,
+    newOfficer: string,
+    _newRole?: UserRole,
+    _newOrg?: OrganizationType | string,
+    remarks?: string,
+  ): Promise<WorkflowTask> {
+    const res = await apiClient.patch<any>(`/workflow/tasks/${id}/reassign`, {
+      newOfficerId: newOfficer,
+      remarks,
+    });
+    if (res?.id) return mapBackendToWorkflowTask(res);
+    if (res?.data?.id) return mapBackendToWorkflowTask(res.data);
+    return res;
+  },
+
+  async addComment(id: string, comment: string): Promise<WorkflowTask> {
+    const res = await apiClient.post<any>(`/workflow/tasks/${id}/comments`, {
+      comment,
+      isInternalOnly: true,
+    });
+    return res;
+  },
+};

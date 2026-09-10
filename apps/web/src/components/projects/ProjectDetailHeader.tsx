@@ -6,6 +6,7 @@ import {
   Building2,
   Calendar,
   CheckCircle2,
+  Clock,
   FileStack,
   Flag,
   GitBranch,
@@ -14,6 +15,7 @@ import {
   Loader2,
   Map,
   MapPin,
+  Send,
   Wallet,
   X,
 } from 'lucide-react';
@@ -25,25 +27,226 @@ import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/store/auth.store';
 import { useUpdateProjectStatus } from '@/hooks/use-projects';
 
-const NEXT_STAGE_RECOMMENDATIONS: Record<ProjectStatus, ProjectStatus[]> = {
-  DRAFT: ['SUBMITTED', 'ON_HOLD'],
-  SUBMITTED: ['UNDER_SCRUTINY', 'DOCUMENT_VERIFICATION', 'REJECTED', 'ON_HOLD'],
-  UNDER_SCRUTINY: ['DOCUMENT_VERIFICATION', 'DISTRICT_APPROVAL', 'REJECTED', 'ON_HOLD'],
-  DOCUMENT_VERIFICATION: ['DISTRICT_APPROVAL', 'STATE_APPROVAL', 'NOTIFICATION_ISSUED', 'REJECTED', 'ON_HOLD'],
-  DISTRICT_APPROVAL: ['STATE_APPROVAL', 'NOTIFICATION_ISSUED', 'REJECTED', 'ON_HOLD'],
-  STATE_APPROVAL: ['CENTRAL_APPROVAL', 'NOTIFICATION_ISSUED', 'REJECTED', 'ON_HOLD'],
-  CENTRAL_APPROVAL: ['NOTIFICATION_ISSUED', 'REJECTED', 'ON_HOLD'],
-  NOTIFICATION_ISSUED: ['AWARD_DECLARED', 'REJECTED', 'ON_HOLD'],
-  AWARD_DECLARED: ['COMPENSATION_ASSESSED', 'REJECTED', 'ON_HOLD'],
-  COMPENSATION_ASSESSED: ['COMPENSATION_DISBURSED', 'POSSESSION_PENDING', 'REJECTED', 'ON_HOLD'],
-  COMPENSATION_DISBURSED: ['POSSESSION_PENDING', 'POSSESSION_COMPLETED', 'ON_HOLD'],
-  POSSESSION_PENDING: ['POSSESSION_COMPLETED', 'ON_HOLD'],
-  POSSESSION_COMPLETED: ['R_AND_R_IN_PROGRESS', 'COMPLETED'],
-  R_AND_R_IN_PROGRESS: ['COMPLETED', 'ON_HOLD'],
-  ON_HOLD: ['DRAFT', 'SUBMITTED', 'UNDER_SCRUTINY', 'DISTRICT_APPROVAL', 'REJECTED'],
-  REJECTED: ['DRAFT'],
-  COMPLETED: [],
-};
+function getAuthorizedTransitions(
+  role?: string,
+  accountType?: string,
+  currentStatus?: ProjectStatus,
+): ProjectStatus[] {
+  if (!currentStatus) return [];
+  const isPia =
+    accountType === 'PIA_USER' || role === 'PROJECT_IMPLEMENTING_AGENCY';
+
+  if (isPia) {
+    if (currentStatus === 'DRAFT') {
+      return ['SUBMITTED', 'ON_HOLD'];
+    }
+    // After SUBMITTED, all government transitions are locked/read-only for PIA
+    return [];
+  }
+
+  // Government Officer / Competent Authority Role Mappings
+  switch (currentStatus) {
+    case 'SUBMITTED':
+      if (
+        [
+          'LAND_ACQUISITION_OFFICER',
+          'DISTRICT_OFFICER',
+          'STATE_OFFICER',
+          'CENTRAL_OFFICER',
+          'SUPER_ADMIN',
+        ].includes(role || '')
+      ) {
+        return ['UNDER_SCRUTINY', 'ON_HOLD', 'REJECTED'];
+      }
+      return [];
+    case 'UNDER_SCRUTINY':
+      if (
+        [
+          'LAND_ACQUISITION_OFFICER',
+          'VERIFICATION_OFFICER',
+          'DISTRICT_OFFICER',
+          'STATE_OFFICER',
+          'CENTRAL_OFFICER',
+          'SUPER_ADMIN',
+        ].includes(role || '')
+      ) {
+        return ['DOCUMENT_VERIFICATION', 'DISTRICT_APPROVAL', 'ON_HOLD', 'REJECTED'];
+      }
+      return [];
+    case 'DOCUMENT_VERIFICATION':
+      if (
+        [
+          'LAND_ACQUISITION_OFFICER',
+          'VERIFICATION_OFFICER',
+          'DISTRICT_OFFICER',
+          'STATE_OFFICER',
+          'CENTRAL_OFFICER',
+          'SUPER_ADMIN',
+        ].includes(role || '')
+      ) {
+        return [
+          'DISTRICT_APPROVAL',
+          'STATE_APPROVAL',
+          'NOTIFICATION_ISSUED',
+          'ON_HOLD',
+          'REJECTED',
+        ];
+      }
+      return [];
+    case 'DISTRICT_APPROVAL':
+      if (
+        [
+          'DISTRICT_OFFICER',
+          'LAND_ACQUISITION_OFFICER',
+          'STATE_OFFICER',
+          'CENTRAL_OFFICER',
+          'SUPER_ADMIN',
+        ].includes(role || '')
+      ) {
+        return ['STATE_APPROVAL', 'NOTIFICATION_ISSUED', 'ON_HOLD', 'REJECTED'];
+      }
+      return [];
+    case 'STATE_APPROVAL':
+      if (
+        ['STATE_OFFICER', 'CENTRAL_OFFICER', 'SUPER_ADMIN'].includes(
+          role || '',
+        )
+      ) {
+        return ['CENTRAL_APPROVAL', 'NOTIFICATION_ISSUED', 'ON_HOLD', 'REJECTED'];
+      }
+      return [];
+    case 'CENTRAL_APPROVAL':
+      if (['CENTRAL_OFFICER', 'SUPER_ADMIN'].includes(role || '')) {
+        return ['NOTIFICATION_ISSUED', 'ON_HOLD', 'REJECTED'];
+      }
+      return [];
+    case 'NOTIFICATION_ISSUED':
+      if (
+        [
+          'LAND_ACQUISITION_OFFICER',
+          'DISTRICT_OFFICER',
+          'STATE_OFFICER',
+          'CENTRAL_OFFICER',
+          'SUPER_ADMIN',
+        ].includes(role || '')
+      ) {
+        return ['AWARD_DECLARED', 'ON_HOLD', 'REJECTED'];
+      }
+      return [];
+    case 'AWARD_DECLARED':
+      if (
+        [
+          'LAND_ACQUISITION_OFFICER',
+          'FINANCE_OFFICER',
+          'DISTRICT_OFFICER',
+          'STATE_OFFICER',
+          'CENTRAL_OFFICER',
+          'SUPER_ADMIN',
+        ].includes(role || '')
+      ) {
+        return ['COMPENSATION_ASSESSED', 'ON_HOLD', 'REJECTED'];
+      }
+      return [];
+    case 'COMPENSATION_ASSESSED':
+      if (
+        [
+          'FINANCE_OFFICER',
+          'DISTRICT_OFFICER',
+          'STATE_OFFICER',
+          'CENTRAL_OFFICER',
+          'SUPER_ADMIN',
+        ].includes(role || '')
+      ) {
+        return [
+          'COMPENSATION_DISBURSED',
+          'POSSESSION_PENDING',
+          'ON_HOLD',
+          'REJECTED',
+        ];
+      }
+      return [];
+    case 'COMPENSATION_DISBURSED':
+      if (
+        [
+          'LAND_ACQUISITION_OFFICER',
+          'FINANCE_OFFICER',
+          'DISTRICT_OFFICER',
+          'STATE_OFFICER',
+          'CENTRAL_OFFICER',
+          'SUPER_ADMIN',
+        ].includes(role || '')
+      ) {
+        return ['POSSESSION_PENDING', 'POSSESSION_COMPLETED', 'ON_HOLD'];
+      }
+      return [];
+    case 'POSSESSION_PENDING':
+      if (
+        [
+          'LAND_ACQUISITION_OFFICER',
+          'DISTRICT_OFFICER',
+          'STATE_OFFICER',
+          'CENTRAL_OFFICER',
+          'SUPER_ADMIN',
+        ].includes(role || '')
+      ) {
+        return ['POSSESSION_COMPLETED', 'ON_HOLD'];
+      }
+      return [];
+    case 'POSSESSION_COMPLETED':
+      if (
+        [
+          'R_AND_R_OFFICER',
+          'LAND_ACQUISITION_OFFICER',
+          'DISTRICT_OFFICER',
+          'STATE_OFFICER',
+          'CENTRAL_OFFICER',
+          'SUPER_ADMIN',
+        ].includes(role || '')
+      ) {
+        return ['R_AND_R_IN_PROGRESS', 'COMPLETED', 'ON_HOLD'];
+      }
+      return [];
+    case 'R_AND_R_IN_PROGRESS':
+      if (
+        [
+          'R_AND_R_OFFICER',
+          'LAND_ACQUISITION_OFFICER',
+          'DISTRICT_OFFICER',
+          'STATE_OFFICER',
+          'CENTRAL_OFFICER',
+          'SUPER_ADMIN',
+        ].includes(role || '')
+      ) {
+        return ['COMPLETED', 'ON_HOLD'];
+      }
+      return [];
+    case 'ON_HOLD':
+      if (
+        [
+          'LAND_ACQUISITION_OFFICER',
+          'DISTRICT_OFFICER',
+          'STATE_OFFICER',
+          'CENTRAL_OFFICER',
+          'SUPER_ADMIN',
+        ].includes(role || '')
+      ) {
+        return [
+          'DRAFT',
+          'SUBMITTED',
+          'UNDER_SCRUTINY',
+          'DISTRICT_APPROVAL',
+          'REJECTED',
+        ];
+      }
+      return [];
+    case 'REJECTED':
+      return [];
+    case 'COMPLETED':
+      return [];
+    default:
+      return [];
+  }
+}
 
 interface ProjectDetailHeaderProps {
   project: AcquisitionProject;
@@ -54,6 +257,9 @@ export function ProjectDetailHeader({ project }: ProjectDetailHeaderProps) {
   const session = useAuthStore((state) => state.session);
   const user = session?.user;
   const isViewer = user?.role === 'VIEWER';
+  const isPiaUser =
+    user?.accountType === 'PIA_USER' ||
+    user?.role === 'PROJECT_IMPLEMENTING_AGENCY';
 
   const updateStatusMutation = useUpdateProjectStatus();
   const [isModalOpen, setIsModalOpen] = React.useState(false);
@@ -68,7 +274,11 @@ export function ProjectDetailHeader({ project }: ProjectDetailHeaderProps) {
       ? (project.implementingAgency as any).name
       : String(project.implementingAgency || 'Implementing Agency');
 
-  const possibleTransitions = NEXT_STAGE_RECOMMENDATIONS[project.status] || [];
+  const possibleTransitions = getAuthorizedTransitions(
+    user?.role,
+    user?.accountType,
+    project.status,
+  );
 
   const handleOpenModal = (targetStatus?: ProjectStatus) => {
     setSelectedStatus(targetStatus || possibleTransitions[0] || '');
@@ -118,7 +328,22 @@ export function ProjectDetailHeader({ project }: ProjectDetailHeaderProps) {
         </button>
 
         <div className="flex items-center gap-3">
-          {!isViewer && possibleTransitions.length > 0 && (
+          {/* PIA Draft Submission Action */}
+          {isPiaUser && project.status === 'DRAFT' && (
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={() => handleOpenModal('SUBMITTED')}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold shadow-xs"
+            >
+              <Send className="h-3.5 w-3.5" />
+              <span>Submit for Statutory Scrutiny</span>
+            </Button>
+          )}
+
+          {/* Government Officer Progress Action */}
+          {!isViewer && !isPiaUser && possibleTransitions.length > 0 && (
             <Button
               type="button"
               variant="primary"
@@ -138,6 +363,17 @@ export function ProjectDetailHeader({ project }: ProjectDetailHeaderProps) {
           </div>
         </div>
       </div>
+
+      {/* PIA Submitted Informational Banner */}
+      {isPiaUser && project.status === 'SUBMITTED' && (
+        <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 text-amber-900 p-3.5 rounded-lg text-xs">
+          <Clock className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+          <div>
+            <span className="font-bold">Awaiting Government Review: </span>
+            This acquisition proposal has been submitted and is currently undergoing preliminary statutory scrutiny by the Competent Government Authority. All lifecycle decisions and milestone approvals are managed by authorized government officers.
+          </div>
+        </div>
+      )}
 
       {/* Main Title & Scope Bar */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">

@@ -12,6 +12,7 @@ import { OrganizationsModule } from './organizations/organizations.module';
 import { UsersModule } from './users/users.module';
 import { ProjectsModule } from './projects/projects.module';
 import { ParcelsModule } from './parcels/parcels.module';
+import { WorkflowModule } from './workflow/workflow.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 
@@ -31,6 +32,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     UsersModule,
     ProjectsModule,
     ParcelsModule,
+    WorkflowModule,
   ],
   providers: [
     {

@@ -233,7 +233,6 @@ export class UsersController {
     UserRole.CENTRAL_OFFICER,
     UserRole.STATE_OFFICER,
     UserRole.DISTRICT_OFFICER,
-    UserRole.PROJECT_IMPLEMENTING_AGENCY,
   )
   @ApiOperation({
     summary: 'Assign User to Project',
@@ -259,7 +258,6 @@ export class UsersController {
     UserRole.CENTRAL_OFFICER,
     UserRole.STATE_OFFICER,
     UserRole.DISTRICT_OFFICER,
-    UserRole.PROJECT_IMPLEMENTING_AGENCY,
   )
   @ApiOperation({
     summary: 'Update Project Assignment Role or Status',
@@ -291,7 +289,6 @@ export class UsersController {
     UserRole.CENTRAL_OFFICER,
     UserRole.STATE_OFFICER,
     UserRole.DISTRICT_OFFICER,
-    UserRole.PROJECT_IMPLEMENTING_AGENCY,
   )
   @ApiOperation({
     summary: 'Deactivate / Revoke Project Assignment',

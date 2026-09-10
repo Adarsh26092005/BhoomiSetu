@@ -5,6 +5,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import {
   AccountType,
@@ -13,9 +14,11 @@ import {
   ProjectCategory,
   ProjectStatus,
   UserRole,
+  WorkflowPriority,
 } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { JurisdictionService } from '../jurisdiction/jurisdiction.service';
+import { WorkflowService } from '../workflow/workflow.service';
 import { AuthenticatedUser } from '../auth/interfaces/jwt-payload.interface';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
@@ -139,6 +142,7 @@ export class ProjectsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jurisdictionService: JurisdictionService,
+    @Optional() private readonly workflowService?: WorkflowService,
   ) {}
 
   // ============================================================================
@@ -447,6 +451,29 @@ export class ProjectsService {
     });
 
     this.logger.log(`Project "${created.title}" (${created.code}) created by actor ${actor.id}`);
+
+    if (created.status === ProjectStatus.SUBMITTED && this.workflowService) {
+      try {
+        await this.workflowService.createRoutedTask({
+          projectId: created.id,
+          projectTitle: created.title,
+          projectCode: created.code,
+          projectState: created.state,
+          projectDistricts: created.districts as string[],
+          currentStage: ProjectStatus.SUBMITTED,
+          targetStage: ProjectStatus.UNDER_SCRUTINY,
+          taskType: 'SCRUTINY',
+          title: `Statutory Preliminary Scrutiny — ${created.code}`,
+          description: `Conduct Section 4 SIA / DPR preliminary boundary review for project ${created.title}`,
+          preferredRole: UserRole.LAND_ACQUISITION_OFFICER,
+          slaDays: 7,
+          priority: WorkflowPriority.HIGH,
+        });
+      } catch (err) {
+        this.logger.warn(`Could not automatically route scrutiny task for project ${created.id}: ${err}`);
+      }
+    }
+
     return this.mapToProjectDetailResponse(created);
   }
 
@@ -654,6 +681,143 @@ export class ProjectsService {
     this.logger.log(
       `Project "${existing.title}" status changed: ${currentStatus} -> ${targetStatus} by actor ${actor.id}`,
     );
+
+    // Trigger automated task routing on lifecycle milestone transitions
+    if (this.workflowService) {
+      try {
+        if (targetStatus === ProjectStatus.SUBMITTED) {
+          await this.workflowService.createRoutedTask({
+            projectId: id,
+            projectTitle: existing.title,
+            projectCode: existing.code,
+            projectState: existing.state,
+            projectDistricts: existing.districts as string[],
+            currentStage: ProjectStatus.SUBMITTED,
+            targetStage: ProjectStatus.UNDER_SCRUTINY,
+            taskType: 'SCRUTINY',
+            title: `Statutory Preliminary Scrutiny — ${existing.code}`,
+            description: `Conduct Section 4 SIA / DPR preliminary boundary review for project ${existing.title}`,
+            preferredRole: UserRole.LAND_ACQUISITION_OFFICER,
+            slaDays: 7,
+            priority: WorkflowPriority.HIGH,
+          });
+        } else if (targetStatus === ProjectStatus.UNDER_SCRUTINY) {
+          // Spawn specialist tasks
+          await Promise.allSettled([
+            this.workflowService.createRoutedTask({
+              projectId: id,
+              projectTitle: existing.title,
+              projectCode: existing.code,
+              projectState: existing.state,
+              projectDistricts: existing.districts as string[],
+              currentStage: ProjectStatus.UNDER_SCRUTINY,
+              targetStage: ProjectStatus.DOCUMENT_VERIFICATION,
+              taskType: 'DOCUMENT_VERIFICATION',
+              title: `Cadastral & Title Document Verification — ${existing.code}`,
+              description: `Verify ownership titles, revenue records, and gazette notifications for ${existing.title}`,
+              preferredRole: UserRole.VERIFICATION_OFFICER,
+              slaDays: 14,
+              priority: WorkflowPriority.MEDIUM,
+            }),
+            this.workflowService.createRoutedTask({
+              projectId: id,
+              projectTitle: existing.title,
+              projectCode: existing.code,
+              projectState: existing.state,
+              projectDistricts: existing.districts as string[],
+              currentStage: ProjectStatus.UNDER_SCRUTINY,
+              taskType: 'SURVEY_VERIFICATION',
+              title: `Cadastral Survey & Boundary Verification — ${existing.code}`,
+              description: `Perform field survey and verify GIS spatial boundaries for ${existing.title}`,
+              preferredRole: UserRole.SURVEY_OFFICER,
+              slaDays: 14,
+              priority: WorkflowPriority.MEDIUM,
+            }),
+            this.workflowService.createRoutedTask({
+              projectId: id,
+              projectTitle: existing.title,
+              projectCode: existing.code,
+              projectState: existing.state,
+              projectDistricts: existing.districts as string[],
+              currentStage: ProjectStatus.UNDER_SCRUTINY,
+              taskType: 'REVENUE_VERIFICATION',
+              title: `Revenue Record & Landowner Verification — ${existing.code}`,
+              description: `Verify Record of Rights (RoR) and title authenticity for ${existing.title}`,
+              preferredRole: UserRole.REVENUE_OFFICER,
+              slaDays: 14,
+              priority: WorkflowPriority.MEDIUM,
+            }),
+          ]);
+        } else if (targetStatus === ProjectStatus.DOCUMENT_VERIFICATION) {
+          await this.workflowService.createRoutedTask({
+            projectId: id,
+            projectTitle: existing.title,
+            projectCode: existing.code,
+            projectState: existing.state,
+            projectDistricts: existing.districts as string[],
+            currentStage: ProjectStatus.DOCUMENT_VERIFICATION,
+            targetStage: ProjectStatus.DISTRICT_APPROVAL,
+            taskType: 'DISTRICT_APPROVAL',
+            title: `Collectorate Statutory Clearance — ${existing.code}`,
+            description: `Review verified records and accord Section 11/15 statutory clearance for ${existing.title}`,
+            preferredRole: UserRole.DISTRICT_OFFICER,
+            slaDays: 14,
+            priority: WorkflowPriority.HIGH,
+          });
+        } else if (targetStatus === ProjectStatus.AWARD_DECLARED) {
+          await this.workflowService.createRoutedTask({
+            projectId: id,
+            projectTitle: existing.title,
+            projectCode: existing.code,
+            projectState: existing.state,
+            projectDistricts: existing.districts as string[],
+            currentStage: ProjectStatus.AWARD_DECLARED,
+            targetStage: ProjectStatus.COMPENSATION_ASSESSED,
+            taskType: 'COMPENSATION_ASSESSMENT',
+            title: `Statutory Compensation Assessment Determination — ${existing.code}`,
+            description: `Calculate solatium, market value, and determine individual awards for ${existing.title}`,
+            preferredRole: UserRole.FINANCE_OFFICER,
+            slaDays: 21,
+            priority: WorkflowPriority.HIGH,
+          });
+        } else if (targetStatus === ProjectStatus.COMPENSATION_ASSESSED) {
+          await this.workflowService.createRoutedTask({
+            projectId: id,
+            projectTitle: existing.title,
+            projectCode: existing.code,
+            projectState: existing.state,
+            projectDistricts: existing.districts as string[],
+            currentStage: ProjectStatus.COMPENSATION_ASSESSED,
+            targetStage: ProjectStatus.COMPENSATION_DISBURSED,
+            taskType: 'COMPENSATION_DISBURSEMENT',
+            title: `PFMS Direct Benefit Disbursement — ${existing.code}`,
+            description: `Execute direct treasury disbursement to verified landholders for ${existing.title}`,
+            preferredRole: UserRole.FINANCE_OFFICER,
+            slaDays: 14,
+            priority: WorkflowPriority.HIGH,
+          });
+        } else if (targetStatus === ProjectStatus.COMPENSATION_DISBURSED) {
+          await this.workflowService.createRoutedTask({
+            projectId: id,
+            projectTitle: existing.title,
+            projectCode: existing.code,
+            projectState: existing.state,
+            projectDistricts: existing.districts as string[],
+            currentStage: ProjectStatus.COMPENSATION_DISBURSED,
+            targetStage: ProjectStatus.POSSESSION_COMPLETED,
+            taskType: 'POSSESSION',
+            title: `Section 38 Statutory Land Handover & Panchnama — ${existing.code}`,
+            description: `Conduct physical site possession and execute panchnama handover for ${existing.title}`,
+            preferredRole: UserRole.LAND_ACQUISITION_OFFICER,
+            slaDays: 30,
+            priority: WorkflowPriority.MEDIUM,
+          });
+        }
+      } catch (err) {
+        this.logger.warn(`Could not automatically route workflow task on status change: ${err}`);
+      }
+    }
+
     return this.mapToProjectDetailResponse(updated);
   }
 
@@ -830,26 +994,76 @@ export class ProjectsService {
     actor: AuthenticatedUser,
     actorOrg: any,
   ): void {
-    // PIA Submission Check
-    if (toStatus === ProjectStatus.SUBMITTED) {
+    const isPiaActor =
+      actor.accountType === AccountType.PIA_USER ||
+      actor.role === UserRole.PROJECT_IMPLEMENTING_AGENCY;
+
+    // 1. Strict PIA Enforcement:
+    // PIA accounts are purely applicants. They can only submit DRAFT -> SUBMITTED
+    // or withdraw/hold their draft (DRAFT -> ON_HOLD).
+    // All post-SUBMITTED government statutory transitions are strictly 403 Forbidden.
+    if (isPiaActor) {
       if (
-        actor.accountType !== AccountType.PIA_USER &&
-        actor.role !== UserRole.SUPER_ADMIN &&
-        actor.role !== UserRole.CENTRAL_OFFICER
+        fromStatus === ProjectStatus.DRAFT &&
+        (toStatus === ProjectStatus.SUBMITTED || toStatus === ProjectStatus.ON_HOLD)
       ) {
-        throw new ForbiddenException('Only the Implementing Agency or Admin can submit project proposal');
+        return;
+      }
+      throw new ForbiddenException(
+        'Forbidden: Project Implementing Agency accounts cannot execute statutory government lifecycle transitions.',
+      );
+    }
+
+    // 2. Submission by Government / Admin
+    if (toStatus === ProjectStatus.SUBMITTED) {
+      return;
+    }
+
+    // 3. Preliminary Scrutiny
+    if (toStatus === ProjectStatus.UNDER_SCRUTINY) {
+      const allowedRoles: UserRole[] = [
+        UserRole.LAND_ACQUISITION_OFFICER,
+        UserRole.DISTRICT_OFFICER,
+        UserRole.STATE_OFFICER,
+        UserRole.CENTRAL_OFFICER,
+        UserRole.SUPER_ADMIN,
+      ];
+      if (!allowedRoles.includes(actor.role)) {
+        throw new ForbiddenException(
+          'Statutory preliminary scrutiny requires LAND_ACQUISITION_OFFICER or authorized administrative authority',
+        );
       }
       return;
     }
 
-    // District Approval Check
+    // 4. Document & Cadastral Verification
+    if (toStatus === ProjectStatus.DOCUMENT_VERIFICATION) {
+      const allowedRoles: UserRole[] = [
+        UserRole.LAND_ACQUISITION_OFFICER,
+        UserRole.VERIFICATION_OFFICER,
+        UserRole.DISTRICT_OFFICER,
+        UserRole.STATE_OFFICER,
+        UserRole.CENTRAL_OFFICER,
+        UserRole.SUPER_ADMIN,
+      ];
+      if (!allowedRoles.includes(actor.role)) {
+        throw new ForbiddenException(
+          'Document and cadastral verification requires VERIFICATION_OFFICER, LAND_ACQUISITION_OFFICER, or authorized authority',
+        );
+      }
+      return;
+    }
+
+    // 5. District Statutory Clearance
     if (toStatus === ProjectStatus.DISTRICT_APPROVAL) {
-      if (
-        actor.role !== UserRole.DISTRICT_OFFICER &&
-        actor.role !== UserRole.STATE_OFFICER &&
-        actor.role !== UserRole.CENTRAL_OFFICER &&
-        actor.role !== UserRole.SUPER_ADMIN
-      ) {
+      const allowedRoles: UserRole[] = [
+        UserRole.DISTRICT_OFFICER,
+        UserRole.LAND_ACQUISITION_OFFICER,
+        UserRole.STATE_OFFICER,
+        UserRole.CENTRAL_OFFICER,
+        UserRole.SUPER_ADMIN,
+      ];
+      if (!allowedRoles.includes(actor.role)) {
         throw new ForbiddenException(
           'District statutory approval requires DISTRICT_OFFICER or authorized administrative authority',
         );
@@ -857,13 +1071,14 @@ export class ProjectsService {
       return;
     }
 
-    // State Approval Check
+    // 6. State Statutory Clearance
     if (toStatus === ProjectStatus.STATE_APPROVAL) {
-      if (
-        actor.role !== UserRole.STATE_OFFICER &&
-        actor.role !== UserRole.CENTRAL_OFFICER &&
-        actor.role !== UserRole.SUPER_ADMIN
-      ) {
+      const allowedRoles: UserRole[] = [
+        UserRole.STATE_OFFICER,
+        UserRole.CENTRAL_OFFICER,
+        UserRole.SUPER_ADMIN,
+      ];
+      if (!allowedRoles.includes(actor.role)) {
         throw new ForbiddenException(
           'State statutory approval requires STATE_OFFICER or authorized administrative authority',
         );
@@ -871,12 +1086,13 @@ export class ProjectsService {
       return;
     }
 
-    // Central Approval Check
+    // 7. Central Statutory Clearance
     if (toStatus === ProjectStatus.CENTRAL_APPROVAL) {
-      if (
-        actor.role !== UserRole.CENTRAL_OFFICER &&
-        actor.role !== UserRole.SUPER_ADMIN
-      ) {
+      const allowedRoles: UserRole[] = [
+        UserRole.CENTRAL_OFFICER,
+        UserRole.SUPER_ADMIN,
+      ];
+      if (!allowedRoles.includes(actor.role)) {
         throw new ForbiddenException(
           'Central statutory approval requires CENTRAL_OFFICER or Central Administrator',
         );
@@ -884,10 +1100,158 @@ export class ProjectsService {
       return;
     }
 
-    // Rejection / Hold Authority
+    // 8. Section 11 Preliminary Notification
+    if (toStatus === ProjectStatus.NOTIFICATION_ISSUED) {
+      const allowedRoles: UserRole[] = [
+        UserRole.LAND_ACQUISITION_OFFICER,
+        UserRole.DISTRICT_OFFICER,
+        UserRole.STATE_OFFICER,
+        UserRole.CENTRAL_OFFICER,
+        UserRole.SUPER_ADMIN,
+      ];
+      if (!allowedRoles.includes(actor.role)) {
+        throw new ForbiddenException(
+          'Issuing statutory preliminary notification requires LAND_ACQUISITION_OFFICER, DISTRICT_OFFICER, or competent authority',
+        );
+      }
+      return;
+    }
+
+    // 9. Section 23 Statutory Award Declaration
+    if (toStatus === ProjectStatus.AWARD_DECLARED) {
+      const allowedRoles: UserRole[] = [
+        UserRole.LAND_ACQUISITION_OFFICER,
+        UserRole.DISTRICT_OFFICER,
+        UserRole.STATE_OFFICER,
+        UserRole.CENTRAL_OFFICER,
+        UserRole.SUPER_ADMIN,
+      ];
+      if (!allowedRoles.includes(actor.role)) {
+        throw new ForbiddenException(
+          'Statutory award declaration requires LAND_ACQUISITION_OFFICER, DISTRICT_OFFICER, or competent authority',
+        );
+      }
+      return;
+    }
+
+    // 10. Compensation Assessment Determination
+    if (toStatus === ProjectStatus.COMPENSATION_ASSESSED) {
+      const allowedRoles: UserRole[] = [
+        UserRole.LAND_ACQUISITION_OFFICER,
+        UserRole.FINANCE_OFFICER,
+        UserRole.DISTRICT_OFFICER,
+        UserRole.STATE_OFFICER,
+        UserRole.CENTRAL_OFFICER,
+        UserRole.SUPER_ADMIN,
+      ];
+      if (!allowedRoles.includes(actor.role)) {
+        throw new ForbiddenException(
+          'Compensation assessment requires FINANCE_OFFICER, LAND_ACQUISITION_OFFICER, or competent authority',
+        );
+      }
+      return;
+    }
+
+    // 11. Compensation Disbursed (PFMS / Treasury)
+    if (toStatus === ProjectStatus.COMPENSATION_DISBURSED) {
+      const allowedRoles: UserRole[] = [
+        UserRole.FINANCE_OFFICER,
+        UserRole.DISTRICT_OFFICER,
+        UserRole.STATE_OFFICER,
+        UserRole.CENTRAL_OFFICER,
+        UserRole.SUPER_ADMIN,
+      ];
+      if (!allowedRoles.includes(actor.role)) {
+        throw new ForbiddenException(
+          'Compensation disbursement requires FINANCE_OFFICER or authorized treasury authority',
+        );
+      }
+      return;
+    }
+
+    // 12. Possession Pending
+    if (toStatus === ProjectStatus.POSSESSION_PENDING) {
+      const allowedRoles: UserRole[] = [
+        UserRole.LAND_ACQUISITION_OFFICER,
+        UserRole.FINANCE_OFFICER,
+        UserRole.DISTRICT_OFFICER,
+        UserRole.STATE_OFFICER,
+        UserRole.CENTRAL_OFFICER,
+        UserRole.SUPER_ADMIN,
+      ];
+      if (!allowedRoles.includes(actor.role)) {
+        throw new ForbiddenException(
+          'Initiating possession proceedings requires LAND_ACQUISITION_OFFICER or competent authority',
+        );
+      }
+      return;
+    }
+
+    // 13. Section 38 Physical Land Possession Taken
+    if (toStatus === ProjectStatus.POSSESSION_COMPLETED) {
+      const allowedRoles: UserRole[] = [
+        UserRole.LAND_ACQUISITION_OFFICER,
+        UserRole.DISTRICT_OFFICER,
+        UserRole.STATE_OFFICER,
+        UserRole.CENTRAL_OFFICER,
+        UserRole.SUPER_ADMIN,
+      ];
+      if (!allowedRoles.includes(actor.role)) {
+        throw new ForbiddenException(
+          'Executing Section 38 statutory land handover requires LAND_ACQUISITION_OFFICER or competent authority',
+        );
+      }
+      return;
+    }
+
+    // 14. Rehabilitation & Resettlement In Progress
+    if (toStatus === ProjectStatus.R_AND_R_IN_PROGRESS) {
+      const allowedRoles: UserRole[] = [
+        UserRole.R_AND_R_OFFICER,
+        UserRole.LAND_ACQUISITION_OFFICER,
+        UserRole.DISTRICT_OFFICER,
+        UserRole.STATE_OFFICER,
+        UserRole.CENTRAL_OFFICER,
+        UserRole.SUPER_ADMIN,
+      ];
+      if (!allowedRoles.includes(actor.role)) {
+        throw new ForbiddenException(
+          'Managing R&R schemes requires R_AND_R_OFFICER or competent authority',
+        );
+      }
+      return;
+    }
+
+    // 15. Final Statutory Project Completion
+    if (toStatus === ProjectStatus.COMPLETED) {
+      const allowedRoles: UserRole[] = [
+        UserRole.LAND_ACQUISITION_OFFICER,
+        UserRole.DISTRICT_OFFICER,
+        UserRole.STATE_OFFICER,
+        UserRole.CENTRAL_OFFICER,
+        UserRole.SUPER_ADMIN,
+      ];
+      if (!allowedRoles.includes(actor.role)) {
+        throw new ForbiddenException(
+          'Statutory project completion requires LAND_ACQUISITION_OFFICER, DISTRICT_OFFICER, or competent authority',
+        );
+      }
+      return;
+    }
+
+    // 16. Rejection / Hold Authority
     if (toStatus === ProjectStatus.REJECTED || toStatus === ProjectStatus.ON_HOLD) {
-      if (actor.accountType === AccountType.PIA_USER) {
-        throw new ForbiddenException('Implementing Agency users cannot reject statutory projects');
+      const allowedRoles: UserRole[] = [
+        UserRole.LAND_ACQUISITION_OFFICER,
+        UserRole.DISTRICT_OFFICER,
+        UserRole.STATE_OFFICER,
+        UserRole.CENTRAL_OFFICER,
+        UserRole.SUPER_ADMIN,
+      ];
+      if (!allowedRoles.includes(actor.role)) {
+        throw new ForbiddenException(
+          'Statutory rejection or stay requires authorized government authority',
+        );
       }
     }
   }

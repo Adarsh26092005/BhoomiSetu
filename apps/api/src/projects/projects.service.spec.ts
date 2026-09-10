@@ -132,6 +132,39 @@ describe('ProjectsService', () => {
     isActive: true,
   };
 
+  const mockLaoUser: AuthenticatedUser = {
+    id: 'user-lao-1',
+    email: 'lao.blr@karnataka.gov.in',
+    fullName: 'Karnataka LAO Officer',
+    accountType: AccountType.GOVERNMENT_OFFICER,
+    role: UserRole.LAND_ACQUISITION_OFFICER,
+    designation: 'Special Land Acquisition Officer',
+    organizationId: 'org-district-1',
+    isActive: true,
+  };
+
+  const mockFinanceUser: AuthenticatedUser = {
+    id: 'user-fin-1',
+    email: 'finance.blr@karnataka.gov.in',
+    fullName: 'Karnataka Finance Officer',
+    accountType: AccountType.GOVERNMENT_OFFICER,
+    role: UserRole.FINANCE_OFFICER,
+    designation: 'Treasury Officer',
+    organizationId: 'org-state-1',
+    isActive: true,
+  };
+
+  const mockSurveyUser: AuthenticatedUser = {
+    id: 'user-srv-1',
+    email: 'survey.blr@karnataka.gov.in',
+    fullName: 'Karnataka Survey Officer',
+    accountType: AccountType.GOVERNMENT_OFFICER,
+    role: UserRole.SURVEY_OFFICER,
+    designation: 'Survey Officer',
+    organizationId: 'org-district-1',
+    isActive: true,
+  };
+
   const mockProject1 = {
     id: 'proj-1',
     code: 'NHAI-BCE-PH2',
@@ -391,6 +424,111 @@ describe('ProjectsService', () => {
 
       expect(result.status).toBe(ProjectStatus.SUBMITTED);
       expect(prisma.auditLog.create).toHaveBeenCalled();
+    });
+
+    it('should forbid PIA user from advancing project SUBMITTED -> UNDER_SCRUTINY (403)', async () => {
+      (prisma.project.findUnique as jest.Mock).mockResolvedValueOnce({
+        ...mockProject1,
+        status: ProjectStatus.SUBMITTED,
+      });
+
+      await expect(
+        service.updateStatus(
+          'proj-1',
+          { status: ProjectStatus.UNDER_SCRUTINY, remarks: 'PIA attempting government scrutiny' },
+          mockPiaUser1,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should forbid PIA user from executing government approvals (403)', async () => {
+      (prisma.project.findUnique as jest.Mock).mockResolvedValueOnce({
+        ...mockProject1,
+        status: ProjectStatus.UNDER_SCRUTINY,
+      });
+
+      await expect(
+        service.updateStatus(
+          'proj-1',
+          { status: ProjectStatus.DISTRICT_APPROVAL, remarks: 'PIA attempting district approval' },
+          mockPiaUser1,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should forbid PIA user from executing compensation disbursement (403)', async () => {
+      (prisma.project.findUnique as jest.Mock).mockResolvedValueOnce({
+        ...mockProject1,
+        status: ProjectStatus.COMPENSATION_ASSESSED,
+      });
+
+      await expect(
+        service.updateStatus(
+          'proj-1',
+          { status: ProjectStatus.COMPENSATION_DISBURSED, remarks: 'PIA attempting disbursement' },
+          mockPiaUser1,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should forbid PIA user from executing possession completion (403)', async () => {
+      (prisma.project.findUnique as jest.Mock).mockResolvedValueOnce({
+        ...mockProject1,
+        status: ProjectStatus.POSSESSION_PENDING,
+      });
+
+      await expect(
+        service.updateStatus(
+          'proj-1',
+          { status: ProjectStatus.POSSESSION_COMPLETED, remarks: 'PIA attempting possession takeover' },
+          mockPiaUser1,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should allow authorized LAND_ACQUISITION_OFFICER to transition SUBMITTED -> UNDER_SCRUTINY', async () => {
+      (prisma.project.findUnique as jest.Mock).mockResolvedValueOnce({
+        ...mockProject1,
+        status: ProjectStatus.SUBMITTED,
+      });
+
+      const result = await service.updateStatus(
+        'proj-1',
+        { status: ProjectStatus.UNDER_SCRUTINY, remarks: 'LAO beginning statutory scrutiny.' },
+        mockLaoUser,
+      );
+
+      expect(result.status).toBe(ProjectStatus.UNDER_SCRUTINY);
+    });
+
+    it('should forbid SURVEY_OFFICER from performing compensation disbursement (403)', async () => {
+      (prisma.project.findUnique as jest.Mock).mockResolvedValueOnce({
+        ...mockProject1,
+        status: ProjectStatus.COMPENSATION_ASSESSED,
+      });
+
+      await expect(
+        service.updateStatus(
+          'proj-1',
+          { status: ProjectStatus.COMPENSATION_DISBURSED, remarks: 'Survey officer attempting disbursement' },
+          mockSurveyUser,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should allow authorized FINANCE_OFFICER to perform compensation disbursement', async () => {
+      (prisma.project.findUnique as jest.Mock).mockResolvedValueOnce({
+        ...mockProject1,
+        status: ProjectStatus.COMPENSATION_ASSESSED,
+      });
+
+      const result = await service.updateStatus(
+        'proj-1',
+        { status: ProjectStatus.COMPENSATION_DISBURSED, remarks: 'PFMS batch verified and disbursed.' },
+        mockFinanceUser,
+      );
+
+      expect(result.status).toBe(ProjectStatus.COMPENSATION_DISBURSED);
     });
 
     it('should reject invalid arbitrary state jumps (e.g. DRAFT -> COMPLETED)', async () => {

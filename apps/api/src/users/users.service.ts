@@ -489,6 +489,15 @@ export class UsersService {
 
     // Jurisdiction check on both user and project
     if (actor) {
+      if (
+        actor.accountType === AccountType.PIA_USER ||
+        actor.role === UserRole.PROJECT_IMPLEMENTING_AGENCY
+      ) {
+        throw new ForbiddenException(
+          'Forbidden: Implementing Agency users cannot assign project team officers',
+        );
+      }
+
       const scope = await this.jurisdictionService.resolveEffectiveScope(actor);
       if (!this.jurisdictionService.canAccessUser(scope, user)) {
         throw new ForbiddenException(
